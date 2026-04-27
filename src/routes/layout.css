@@ -406,6 +406,49 @@ details > summary {
 	background: oklch(0.22 0.01 230 / 0.5);
 }
 
+.join-connector {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0 0.25rem;
+}
+
+.join-line {
+	flex: 1;
+	height: 1px;
+	background: oklch(0.32 0 0);
+}
+
+.join-pill {
+	font-size: 0.68rem;
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	padding: 0.18rem 0.65rem;
+	border-radius: 999px;
+	border: 1px solid oklch(0.38 0 0);
+	background: transparent;
+	color: oklch(0.55 0 0);
+	cursor: pointer;
+	transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+
+.join-pill:hover {
+	border-color: oklch(0.55 0 0);
+	color: oklch(0.82 0 0);
+}
+
+.join-pill.active-and {
+	background: oklch(0.28 0.08 230);
+	border-color: oklch(0.55 0.12 230);
+	color: oklch(0.88 0.1 230);
+}
+
+.join-pill.active-or {
+	background: oklch(0.28 0.1 50);
+	border-color: oklch(0.6 0.15 50);
+	color: oklch(0.88 0.12 50);
+}
+
 * {
 	scrollbar-width: thin;
 	scrollbar-color: oklch(0.42 0 0) oklch(0.16 0 0);

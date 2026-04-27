@@ -1634,19 +1634,19 @@
 														{#if simpleConditionsByRule[index]}
 															<div class="stack">
 																{#each simpleConditionsByRule[index] as condition, conditionIndex}
-																	<div class="panel stack">
-																		{#if conditionIndex > 0}
-																			<div class="row">
-																				<span class="label">Join</span>
-																				<button type="button" class="button {condition.joinWithPrevious === 'and' ? '' : 'secondary'}" onclick={() => onSimpleJoinChange(index, condition.id, 'and')}>AND</button>
-																				<button type="button" class="button {condition.joinWithPrevious === 'or' ? '' : 'secondary'}" onclick={() => onSimpleJoinChange(index, condition.id, 'or')}>OR</button>
-																			</div>
-																		{/if}
-
-																		<div class="grid-2">
-																			<label class="stack">
-																				<span class="label">Field</span>
-																				<select class="select mono" bind:value={condition.field} onchange={() => onSimpleFieldChange(index, condition.id, condition.field)}>
+										{#if conditionIndex > 0}
+											<div class="join-connector">
+												<div class="join-line"></div>
+												<button type="button" class="join-pill {condition.joinWithPrevious === 'and' ? 'active-and' : ''}" onclick={() => onSimpleJoinChange(index, condition.id, 'and')}>AND</button>
+												<button type="button" class="join-pill {condition.joinWithPrevious === 'or' ? 'active-or' : ''}" onclick={() => onSimpleJoinChange(index, condition.id, 'or')}>OR</button>
+												<div class="join-line"></div>
+											</div>
+										{/if}
+										<div class="panel stack">
+																			<div class="grid-2">
+																				<label class="stack">
+																					<span class="label">Field</span>
+																					<select class="select mono" bind:value={condition.field} onchange={() => onSimpleFieldChange(index, condition.id, condition.field)}>
 																					{#each MATCH_FIELDS as field}
 																						<option value={field.value}>{field.label}</option>
 																					{/each}
@@ -1713,8 +1713,8 @@
 															</div>
 
 															<div class="row">
-																<button class="button secondary" type="button" onclick={() => addSimpleCondition(index, 'and')}>AND</button>
-																<button class="button" type="button" onclick={() => addSimpleCondition(index, 'or')}>OR</button>
+																<button class="button secondary" type="button" onclick={() => addSimpleCondition(index, 'and')}>+ AND condition</button>
+																<button class="button secondary" type="button" onclick={() => addSimpleCondition(index, 'or')}>+ OR condition</button>
 															</div>
 														{/if}
 													{/if}
@@ -1843,14 +1843,15 @@
 					{#if simpleConditionsByRule[CREATE_EDITOR_INDEX]}
 						<div class="stack">
 							{#each simpleConditionsByRule[CREATE_EDITOR_INDEX] as condition, conditionIndex}
+								{#if conditionIndex > 0}
+									<div class="join-connector">
+										<div class="join-line"></div>
+										<button type="button" class="join-pill {condition.joinWithPrevious === 'and' ? 'active-and' : ''}" onclick={() => onSimpleJoinChange(CREATE_EDITOR_INDEX, condition.id, 'and')}>AND</button>
+										<button type="button" class="join-pill {condition.joinWithPrevious === 'or' ? 'active-or' : ''}" onclick={() => onSimpleJoinChange(CREATE_EDITOR_INDEX, condition.id, 'or')}>OR</button>
+										<div class="join-line"></div>
+									</div>
+								{/if}
 								<div class="panel stack">
-									{#if conditionIndex > 0}
-										<div class="row">
-											<span class="label">Join</span>
-											<button type="button" class="button {condition.joinWithPrevious === 'and' ? '' : 'secondary'}" onclick={() => onSimpleJoinChange(CREATE_EDITOR_INDEX, condition.id, 'and')}>AND</button>
-											<button type="button" class="button {condition.joinWithPrevious === 'or' ? '' : 'secondary'}" onclick={() => onSimpleJoinChange(CREATE_EDITOR_INDEX, condition.id, 'or')}>OR</button>
-										</div>
-									{/if}
 
 									<div class="grid-2">
 										<label class="stack">
@@ -1922,8 +1923,8 @@
 						</div>
 
 						<div class="row">
-							<button class="button secondary" type="button" onclick={() => addSimpleCondition(CREATE_EDITOR_INDEX, 'and')}>AND</button>
-							<button class="button" type="button" onclick={() => addSimpleCondition(CREATE_EDITOR_INDEX, 'or')}>OR</button>
+							<button class="button secondary" type="button" onclick={() => addSimpleCondition(CREATE_EDITOR_INDEX, 'and')}>+ AND condition</button>
+							<button class="button secondary" type="button" onclick={() => addSimpleCondition(CREATE_EDITOR_INDEX, 'or')}>+ OR condition</button>
 						</div>
 					{/if}
 				{/if}
