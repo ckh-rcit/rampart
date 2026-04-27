@@ -1709,6 +1709,7 @@
 					<textarea class="textarea mono" bind:value={createBlockBody} placeholder="Your request was blocked."></textarea>
 				</label>
 				{/if}
+				</div>
 			{/if}
 
 			<div class="row">
