@@ -280,7 +280,7 @@
 	async function executeRemove(): Promise<void> {
 		if (!removeAcknowledged || removePreviewZones.length === 0) return;
 		busy = true;
-		removeConfirmOpen = false;
+		// Keep removeConfirmOpen true so the preview panel stays visible as a live progress view
 
 		const patternLower = removeNameQuery.trim().toLowerCase();
 		const init: Record<string, BulkStatus> = {};
@@ -322,6 +322,7 @@
 			onshowtoast('error', `${ok} zones succeeded, ${err} failed — see details below.`);
 		}
 
+		removeConfirmOpen = false;
 		removePreview = {};
 		removeAcknowledged = false;
 		removeExpandedExpressions = {};
@@ -1329,7 +1330,18 @@
 
 				{#each removePreviewZones as [zoneId, { zoneName, rules }]}
 					<div class="remove-preview-zone">
-						<div class="remove-preview-zone-name">{zoneName}</div>
+						<div class="remove-preview-zone-name" style="display: flex; align-items: center; gap: 0.5rem;">
+							<span>{zoneName}</span>
+							{#if removeProgress[zoneId] === 'pending'}
+								<span class="bulk-status pending">queued</span>
+							{:else if removeProgress[zoneId] === 'running'}
+								<span class="bulk-status running">removing…</span>
+							{:else if removeProgress[zoneId] === 'ok'}
+								<span class="bulk-status ok">✓ done</span>
+							{:else if removeProgress[zoneId] === 'error'}
+								<span class="bulk-status error">✗ failed</span>
+							{/if}
+						</div>
 						<div style="overflow-x: auto;">
 							<table>
 								<thead>
