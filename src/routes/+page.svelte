@@ -42,6 +42,8 @@
 		| 'less_than_or_equal'
 		| 'greater_than'
 		| 'greater_than_or_equal'
+		| 'in_set'
+		| 'not_in_set'
 		| 'in_list'
 		| 'not_in_list';
 
@@ -78,6 +80,10 @@
 	interface RulesResponse extends ApiError {
 		name?: string;
 		rules?: WafRule[];
+	}
+
+	interface ExpressionValidateResponse extends ApiError {
+		valid?: boolean;
 	}
 
 	type CustomBlockResponseContentType = 'text/html' | 'text/plain' | 'application/json' | 'text/xml';
@@ -148,6 +154,8 @@
 		{ label: 'less than or equal', value: 'less_than_or_equal', numericOnly: true },
 		{ label: 'greater than', value: 'greater_than', numericOnly: true },
 		{ label: 'greater than or equal', value: 'greater_than_or_equal', numericOnly: true },
+		{ label: 'is in set', value: 'in_set' },
+		{ label: 'is not in set', value: 'not_in_set' },
 		{ label: 'is in list', value: 'in_list' },
 		{ label: 'is not in list', value: 'not_in_list' }
 	];
@@ -181,10 +189,12 @@
 	let createDescription = $state('');
 	let createAction = $state<WafAction>('block');
 	let createExpressionText = $state('');
+	let createExpressionValidationError = $state('');
 	let createBlockResponseType = $state<BlockResponseTypeValue>(DEFAULT_BLOCK_RESPONSE_TYPE);
 	let createBlockStatusCode = $state(403);
 	let createBlockBody = $state('');
 	let previewRules = $state<WafRule[]>([]);
+	let existingExpressionValidationErrors = $state<Record<number, string>>({});
 
 	// Cross-zone copy
 	let copyTargetZoneIds = $state<Set<string>>(new Set());
@@ -356,6 +366,47 @@
 		return rules.map((rule) => sanitizeRuleForSubmission(rule));
 	}
 
+	async function validateExpressionWithApi(expression: string): Promise<string | null> {
+		const trimmed = expression.trim();
+		if (!trimmed) return 'Expression is required.';
+
+		try {
+			const response = await fetch('/api/expressions/validate', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ expression: trimmed })
+			});
+			const data = (await response.json()) as ExpressionValidateResponse;
+			if (!response.ok || data.valid === false) {
+				return data.error || 'Expression is invalid.';
+			}
+			return null;
+		} catch {
+			return 'Could not validate expression with Cloudflare. Please try again.';
+		}
+	}
+
+	async function validateExistingRuleExpressions(rules: WafRule[]): Promise<boolean> {
+		const errorsByIndex: Record<number, string> = {};
+
+		for (const [index, rule] of rules.entries()) {
+			const validationError = await validateExpressionWithApi(rule.expression ?? '');
+			if (validationError) {
+				errorsByIndex[index] = validationError;
+			}
+		}
+
+		existingExpressionValidationErrors = errorsByIndex;
+		return Object.keys(errorsByIndex).length === 0;
+	}
+
+	function clearExistingExpressionValidationError(index: number): void {
+		if (!existingExpressionValidationErrors[index]) return;
+		const next = { ...existingExpressionValidationErrors };
+		delete next[index];
+		existingExpressionValidationErrors = next;
+	}
+
 	function toggleExpandRule(index: number): void {
 		expandedRuleIndex = expandedRuleIndex === index ? null : index;
 	}
@@ -404,6 +455,15 @@
 
 	function isListOperator(op: MatchOperatorOptionValue): boolean {
 		return op === 'in_list' || op === 'not_in_list';
+	}
+
+	function isSetOperator(op: MatchOperatorOptionValue): boolean {
+		return op === 'in_set' || op === 'not_in_set';
+	}
+
+	function simpleValuePlaceholder(op: MatchOperatorOptionValue): string {
+		if (isSetOperator(op)) return '203.0.113.0/24 198.51.100.0/24';
+		return '';
 	}
 
 	function nextSimpleConditionId(): number {
@@ -466,6 +526,10 @@
 				return `(${field} gt ${condition.value})`;
 			case 'greater_than_or_equal':
 				return `(${field} ge ${condition.value})`;
+			case 'in_set':
+				return `(${field} in {${(condition.value ?? '').trim()}})`;
+			case 'not_in_set':
+				return `(not ${field} in {${(condition.value ?? '').trim()}})`;
 			case 'in_list':
 				return `(${field} in $${condition.value})`;
 			case 'not_in_list':
@@ -483,10 +547,12 @@
 	function setExpressionForEditor(index: number, expression: string): void {
 		if (index === CREATE_EDITOR_INDEX) {
 			createExpressionText = expression;
+			createExpressionValidationError = '';
 			return;
 		}
 		if (!existingRules[index]) return;
 		existingRules[index].expression = expression;
+		clearExistingExpressionValidationError(index);
 	}
 
 	function rebuildRuleExpressionFromSimple(index: number): void {
@@ -520,7 +586,7 @@
 		}
 
 		const numeric = trimmed.match(
-			/^\((http\.[A-Za-z0-9_.]+|ip\.src(?:\.[A-Za-z0-9_.]+)?|cf\.[A-Za-z0-9_.]+)\s+(lt|le|gt|ge)\s+(\d+)\)$/
+			/^\((http\.[A-Za-z0-9_.]+|ip\.src(?:\.[A-Za-z0-9_.]+)?|cf\.[A-Za-z0-9_.]+)\s+(lt|le|gt|ge)\s+(-?\d+)\)$/
 		);
 		if (numeric) {
 			const map: Record<string, MatchOperatorOptionValue> = { lt: 'less_than', le: 'less_than_or_equal', gt: 'greater_than', ge: 'greater_than_or_equal' };
@@ -532,8 +598,12 @@
 		);
 		if (direct) {
 			const map: Record<string, MatchOperatorOptionValue> = {
-				wildcard: 'wildcard', 'strict wildcard': 'strict_wildcard',
-				eq: 'equals', ne: 'not_equals', contains: 'contains', matches: 'matches_regex'
+				wildcard: 'wildcard',
+				'strict wildcard': 'strict_wildcard',
+				eq: 'equals',
+				ne: 'not_equals',
+				contains: 'contains',
+				matches: 'matches_regex'
 			};
 			const op = map[direct[2]];
 			if (!op) return null;
@@ -562,6 +632,20 @@
 		);
 		if (fnNeg) {
 			return { field: fnNeg[2] as MatchFieldOptionValue, operator: fnNeg[1] === 'starts_with' ? 'not_starts_with' : 'not_ends_with', value: unescapeExpressionValue(fnNeg[3]), booleanToggleOn: true };
+		}
+
+		const inSet = trimmed.match(
+			/^\((http\.[A-Za-z0-9_.]+|ip\.src(?:\.[A-Za-z0-9_.]+)?|cf\.[A-Za-z0-9_.]+)\s+in\s+\{([^}]*)\}\)$/
+		);
+		if (inSet) {
+			return { field: inSet[1] as MatchFieldOptionValue, operator: 'in_set', value: inSet[2].trim(), booleanToggleOn: true };
+		}
+
+		const notInSet = trimmed.match(
+			/^\(not\s+(http\.[A-Za-z0-9_.]+|ip\.src(?:\.[A-Za-z0-9_.]+)?|cf\.[A-Za-z0-9_.]+)\s+in\s+\{([^}]*)\}\)$/
+		);
+		if (notInSet) {
+			return { field: notInSet[1] as MatchFieldOptionValue, operator: 'not_in_set', value: notInSet[2].trim(), booleanToggleOn: true };
 		}
 
 		const inList = trimmed.match(
@@ -601,28 +685,22 @@
 			if (!inQuote) {
 				if (char === '(') depth += 1;
 				if (char === ')') depth -= 1;
+				if (depth < 0) return null;
 
-				if (depth === 0) {
-					const remainder = expression.slice(i + 1).trimStart().toLowerCase();
-					if (remainder.startsWith('and ')) {
-						current += char;
-						out.push({ joinWithPrevious: pendingJoin, clause: current.trim() });
-						current = '';
-						pendingJoin = 'and';
-						const skipTo = expression.indexOf('and ', i + 1);
-						i = skipTo + 3;
-						continue;
-					}
+				if (depth === 0 && expression.startsWith(' and ', i)) {
+					out.push({ joinWithPrevious: pendingJoin, clause: current.trim() });
+					current = '';
+					pendingJoin = 'and';
+					i += 4;
+					continue;
+				}
 
-					if (remainder.startsWith('or ')) {
-						current += char;
-						out.push({ joinWithPrevious: pendingJoin, clause: current.trim() });
-						current = '';
-						pendingJoin = 'or';
-						const skipTo = expression.indexOf('or ', i + 1);
-						i = skipTo + 2;
-						continue;
-					}
+				if (depth === 0 && expression.startsWith(' or ', i)) {
+					out.push({ joinWithPrevious: pendingJoin, clause: current.trim() });
+					current = '';
+					pendingJoin = 'or';
+					i += 3;
+					continue;
 				}
 			}
 
@@ -630,21 +708,60 @@
 		}
 
 		if (inQuote || depth !== 0) return null;
-		if (current.trim()) {
-			out.push({ joinWithPrevious: pendingJoin, clause: current.trim() });
-		}
-
+		if (current.trim()) out.push({ joinWithPrevious: pendingJoin, clause: current.trim() });
 		return out.length > 0 ? out : null;
 	}
 
+	function isFullyWrappedExpression(expression: string): boolean {
+		const trimmed = expression.trim();
+		if (!trimmed.startsWith('(') || !trimmed.endsWith(')')) return false;
+
+		let depth = 0;
+		let inQuote = false;
+		for (let i = 0; i < trimmed.length; i += 1) {
+			const char = trimmed[i];
+			const prev = i > 0 ? trimmed[i - 1] : '';
+
+			if (char === '"' && prev !== '\\') {
+				inQuote = !inQuote;
+				continue;
+			}
+			if (inQuote) continue;
+
+			if (char === '(') depth += 1;
+			if (char === ')') depth -= 1;
+			if (depth === 0 && i < trimmed.length - 1) return false;
+			if (depth < 0) return false;
+		}
+
+		return depth === 0;
+	}
+
+	function unwrapOuterCompoundGroup(expression: string): string {
+		let current = expression.trim();
+		while (isFullyWrappedExpression(current)) {
+			const inner = current.slice(1, -1).trim();
+			const innerParts = splitTopLevelClauses(inner);
+			if (innerParts && innerParts.length > 1) {
+				current = inner;
+				continue;
+			}
+			break;
+		}
+		return current;
+	}
+
 	function parseExpressionToSimpleConditions(expression: string): SimpleMatchCondition[] | null {
-		const parts = splitTopLevelClauses(expression);
+		const source = unwrapOuterCompoundGroup(expression);
+		const parts = splitTopLevelClauses(source);
 		if (!parts) return null;
 
 		const parsed: SimpleMatchCondition[] = [];
 
 		for (const [index, part] of parts.entries()) {
-			const clause = parseSimpleClause(part.clause);
+			const rawClause = part.clause.trim();
+			const normalizedClause = rawClause.startsWith('(') ? rawClause : `(${rawClause})`;
+			const clause = parseSimpleClause(normalizedClause);
 			if (!clause) return null;
 			if (!MATCH_FIELDS.some((field) => field.value === clause.field)) return null;
 
@@ -662,7 +779,7 @@
 		const parsed = parseExpressionToSimpleConditions(getExpressionForEditor(index) || '');
 		if (!parsed) {
 			simpleParseErrorsByRule[index] =
-				'Current expression could not be mapped to Simple View. Switch back to Expression View or start a new simple expression.';
+				'Simple View supports and/or combinations of basic clauses (including inline sets like ip.src in {203.0.113.0/24} and Cloudflare lists like ip.src in $my_list). This expression uses syntax Simple View cannot safely represent.';
 			simpleConditionsByRule[index] = [defaultSimpleCondition()];
 			return;
 		}
@@ -785,6 +902,7 @@
 			if (!response.ok) throw new Error(data.error || 'Failed to load rules');
 			existingRulesetName = data.name || 'Custom rules';
 			existingRules = data.rules || [];
+			existingExpressionValidationErrors = {};
 			expandedRuleIndex = null;
 			showToast('ok', `Loaded ${existingRules.length} existing rule(s).`);
 		} catch (error) {
@@ -798,6 +916,11 @@
 		if (!selectedZoneId) return;
 		busy = true;
 		try {
+			const valid = await validateExistingRuleExpressions(existingRules);
+			if (!valid) {
+				throw new Error('One or more rule expressions are invalid. Expand the affected rules to review errors.');
+			}
+
 			const sanitizedRules = sanitizeRulesForSubmission(existingRules);
 			const response = await fetch(`/api/zones/${selectedZoneId}/rules`, {
 				method: 'PUT',
@@ -807,6 +930,7 @@
 			const data = (await response.json()) as RulesResponse;
 			if (!response.ok) throw new Error(data.error || 'Save failed');
 			existingRules = data.rules || [];
+			existingExpressionValidationErrors = {};
 			showToast('ok', 'Rules saved successfully.');
 		} catch (error) {
 			showToast('error', error instanceof Error ? error.message : 'Save failed');
@@ -849,9 +973,15 @@
 		return rule;
 	}
 
-	function addToPreview(): void {
+	async function addToPreview(): Promise<void> {
 		try {
 			if (!createExpressionText.trim()) throw new Error('Expression is required.');
+			const expressionError = await validateExpressionWithApi(createExpressionText);
+			createExpressionValidationError = expressionError ?? '';
+			if (expressionError) {
+				throw new Error('Expression validation failed.');
+			}
+
 			if (
 				createAction === 'block' &&
 				createBlockResponseType !== DEFAULT_BLOCK_RESPONSE_TYPE &&
@@ -860,6 +990,7 @@
 				throw new Error('Response body is required when using a custom block response.');
 			}
 			previewRules = [...previewRules, buildCreateRule()];
+			createExpressionValidationError = '';
 			showToast('ok', 'Rule added to preview.');
 		} catch (error) {
 			showToast('error', error instanceof Error ? error.message : 'Failed to build rule');
@@ -870,10 +1001,24 @@
 		previewRules = previewRules.filter((_, i) => i !== index);
 	}
 
+	async function validatePreviewRuleExpressions(rules: WafRule[]): Promise<boolean> {
+		for (const rule of rules) {
+			const validationError = await validateExpressionWithApi(rule.expression ?? '');
+			if (validationError) {
+				showToast('error', `Preview rule expression invalid: ${validationError}`);
+				return false;
+			}
+		}
+		return true;
+	}
+
 	async function deployReplace(): Promise<void> {
 		if (!selectedZoneId || previewRules.length === 0) return;
 		busy = true;
 		try {
+			const valid = await validatePreviewRuleExpressions(previewRules);
+			if (!valid) return;
+
 			const sanitizedRules = sanitizeRulesForSubmission(previewRules);
 			const response = await fetch(`/api/zones/${selectedZoneId}/rules`, {
 				method: 'PUT',
@@ -895,6 +1040,9 @@
 		if (!selectedZoneId || previewRules.length === 0) return;
 		busy = true;
 		try {
+			const valid = await validatePreviewRuleExpressions(previewRules);
+			if (!valid) return;
+
 			const loadRes = await fetch(`/api/zones/${selectedZoneId}/rules`);
 			const loadData = (await loadRes.json()) as RulesResponse;
 			if (!loadRes.ok) throw new Error(loadData.error || 'Failed to load existing rules');
@@ -1249,7 +1397,7 @@
 																bind:this={expressionInputs[index]}
 																bind:value={rule.expression}
 																onscroll={() => syncExpressionScroll(index)}
-																oninput={() => syncExpressionScroll(index)}
+																oninput={() => { syncExpressionScroll(index); clearExistingExpressionValidationError(index); }}
 																spellcheck="false"
 															></textarea>
 														</div>
@@ -1323,7 +1471,7 @@
 																		{:else}
 																			<label class="stack">
 																				<span class="muted">Value</span>
-																				<input class="input mono" bind:value={condition.value} oninput={() => onSimpleValueChange(index)} />
+																				<input class="input mono" bind:value={condition.value} oninput={() => onSimpleValueChange(index)} placeholder={simpleValuePlaceholder(condition.operator)} />
 																			</label>
 																		{/if}
 
@@ -1341,6 +1489,10 @@
 														{/if}
 													{/if}
 												</div>
+
+												{#if existingExpressionValidationErrors[index]}
+													<div class="status error">{existingExpressionValidationErrors[index]}</div>
+												{/if}
 
 												<!-- Action selector -->
 												<div class="grid-2">
@@ -1429,7 +1581,7 @@
 							bind:this={expressionInputs[CREATE_EDITOR_INDEX]}
 							bind:value={createExpressionText}
 							onscroll={() => syncExpressionScroll(CREATE_EDITOR_INDEX)}
-							oninput={() => syncExpressionScroll(CREATE_EDITOR_INDEX)}
+							oninput={() => { syncExpressionScroll(CREATE_EDITOR_INDEX); createExpressionValidationError = ''; }}
 							spellcheck="false"
 							placeholder='(ip.src.country eq "GB") and (cf.waf.score lt 20)'
 						></textarea>
@@ -1504,7 +1656,7 @@
 									{:else}
 										<label class="stack">
 											<span class="muted">Value</span>
-											<input class="input mono" bind:value={condition.value} oninput={() => onSimpleValueChange(CREATE_EDITOR_INDEX)} />
+											<input class="input mono" bind:value={condition.value} oninput={() => onSimpleValueChange(CREATE_EDITOR_INDEX)} placeholder={simpleValuePlaceholder(condition.operator)} />
 										</label>
 									{/if}
 
@@ -1522,6 +1674,10 @@
 					{/if}
 				{/if}
 			</div>
+
+			{#if createExpressionValidationError}
+				<div class="status error">{createExpressionValidationError}</div>
+			{/if}
 
 			<div class="grid-2">
 				<label class="stack">

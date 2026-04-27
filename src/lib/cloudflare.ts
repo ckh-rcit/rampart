@@ -130,6 +130,13 @@ export async function upsertCustomRulesEntrypoint(zoneId: string, payload: CfRul
 	return updated.result;
 }
 
+export async function validateRulesExpression(expression: string): Promise<void> {
+	await cfFetch<null>('/filters/validate-expr', {
+		method: 'POST',
+		body: JSON.stringify({ expression })
+	});
+}
+
 export function buildRulesetPayload(name: string, rules: WafRule[]): CfRuleset {
 	return {
 		name,
