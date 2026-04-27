@@ -80,6 +80,18 @@
 		rules?: WafRule[];
 	}
 
+	type CustomBlockResponseContentType = 'text/html' | 'text/plain' | 'application/json' | 'text/xml';
+	type BlockResponseTypeValue = 'default_waf_block_403' | CustomBlockResponseContentType;
+
+	const CUSTOM_BLOCK_RESPONSE_CONTENT_TYPES: CustomBlockResponseContentType[] = [
+		'text/html',
+		'text/plain',
+		'application/json',
+		'text/xml'
+	];
+
+	const DEFAULT_BLOCK_RESPONSE_TYPE: BlockResponseTypeValue = 'default_waf_block_403';
+
 	const WAF_ACTIONS: { value: WafAction; label: string }[] = [
 		{ value: 'block', label: 'Block' },
 		{ value: 'managed_challenge', label: 'Managed Challenge' },
@@ -89,7 +101,8 @@
 		{ value: 'log', label: 'Log (Enterprise)' }
 	];
 
-	const BLOCK_RESPONSE_TYPES = [
+	const BLOCK_RESPONSE_TYPES: { value: BlockResponseTypeValue; label: string }[] = [
+		{ value: DEFAULT_BLOCK_RESPONSE_TYPE, label: 'Default Cloudflare WAF block page (403)' },
 		{ value: 'text/html', label: 'Custom HTML' },
 		{ value: 'text/plain', label: 'Custom Text' },
 		{ value: 'application/json', label: 'Custom JSON' },
@@ -168,7 +181,7 @@
 	let createDescription = $state('');
 	let createAction = $state<WafAction>('block');
 	let createExpressionText = $state('');
-	let createBlockResponseType = $state('text/html');
+	let createBlockResponseType = $state<BlockResponseTypeValue>(DEFAULT_BLOCK_RESPONSE_TYPE);
 	let createBlockStatusCode = $state(403);
 	let createBlockBody = $state('');
 	let previewRules = $state<WafRule[]>([]);
@@ -237,6 +250,95 @@
 
 	function actionLabel(action: WafAction): string {
 		return WAF_ACTIONS.find((a) => a.value === action)?.label ?? action;
+	}
+
+	function isCustomBlockResponseType(type: string | undefined): type is CustomBlockResponseContentType {
+		return CUSTOM_BLOCK_RESPONSE_CONTENT_TYPES.includes(type as CustomBlockResponseContentType);
+	}
+
+	function ensureRuleBlockResponse(rule: WafRule): NonNullable<NonNullable<WafRule['action_parameters']>['response']> {
+		rule.action_parameters ??= {};
+		rule.action_parameters.response ??= {};
+		return rule.action_parameters.response;
+	}
+
+	function clearRuleBlockResponse(rule: WafRule): void {
+		if (!rule.action_parameters) return;
+		delete rule.action_parameters.response;
+		if (Object.keys(rule.action_parameters).length === 0) {
+			delete rule.action_parameters;
+		}
+	}
+
+	function getRuleBlockResponseType(rule: WafRule): BlockResponseTypeValue {
+		const contentType = rule.action_parameters?.response?.content_type;
+		if (!isCustomBlockResponseType(contentType)) return DEFAULT_BLOCK_RESPONSE_TYPE;
+		return contentType;
+	}
+
+	function getRuleBlockStatusCode(rule: WafRule): number {
+		return rule.action_parameters?.response?.status_code ?? 403;
+	}
+
+	function getRuleBlockBody(rule: WafRule): string {
+		return rule.action_parameters?.response?.content ?? '';
+	}
+
+	function onRuleBlockResponseTypeChange(rule: WafRule, selectedValue: string): void {
+		const selected = selectedValue as BlockResponseTypeValue;
+		if (selected === DEFAULT_BLOCK_RESPONSE_TYPE) {
+			clearRuleBlockResponse(rule);
+			return;
+		}
+
+		const response = ensureRuleBlockResponse(rule);
+		response.content_type = selected;
+		response.status_code ??= 403;
+		response.content ??= '';
+	}
+
+	function onRuleBlockStatusCodeInput(rule: WafRule, rawValue: string): void {
+		if (getRuleBlockResponseType(rule) === DEFAULT_BLOCK_RESPONSE_TYPE) return;
+		const response = ensureRuleBlockResponse(rule);
+		response.status_code = parseInt(rawValue, 10) || 403;
+	}
+
+	function onRuleBlockBodyInput(rule: WafRule, body: string): void {
+		if (getRuleBlockResponseType(rule) === DEFAULT_BLOCK_RESPONSE_TYPE) return;
+		const response = ensureRuleBlockResponse(rule);
+		response.content = body;
+	}
+
+	function sanitizeRuleForSubmission(rule: WafRule): WafRule {
+		if (rule.action !== 'block') return rule;
+
+		const response = rule.action_parameters?.response;
+		if (!response) return rule;
+
+		const contentType = response.content_type;
+		const content = response.content?.trim() ?? '';
+
+		if (!isCustomBlockResponseType(contentType) || !content) {
+			const sanitized: WafRule = { ...rule, action_parameters: rule.action_parameters ? { ...rule.action_parameters } : undefined };
+			clearRuleBlockResponse(sanitized);
+			return sanitized;
+		}
+
+		return {
+			...rule,
+			action_parameters: {
+				...(rule.action_parameters ?? {}),
+				response: {
+					status_code: response.status_code ?? 403,
+					content,
+					content_type: contentType
+				}
+			}
+		};
+	}
+
+	function sanitizeRulesForSubmission(rules: WafRule[]): WafRule[] {
+		return rules.map((rule) => sanitizeRuleForSubmission(rule));
 	}
 
 	function toggleExpandRule(index: number): void {
@@ -681,10 +783,11 @@
 		if (!selectedZoneId) return;
 		busy = true;
 		try {
+			const sanitizedRules = sanitizeRulesForSubmission(existingRules);
 			const response = await fetch(`/api/zones/${selectedZoneId}/rules`, {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ name: existingRulesetName, rules: existingRules })
+				body: JSON.stringify({ name: existingRulesetName, rules: sanitizedRules })
 			});
 			const data = (await response.json()) as RulesResponse;
 			if (!response.ok) throw new Error(data.error || 'Save failed');
@@ -718,7 +821,7 @@
 			enabled: true
 		};
 
-		if (createAction === 'block' && createBlockBody.trim()) {
+		if (createAction === 'block' && createBlockResponseType !== DEFAULT_BLOCK_RESPONSE_TYPE && createBlockBody.trim()) {
 			rule.action_parameters = {
 				response: {
 					status_code: createBlockStatusCode,
@@ -734,6 +837,13 @@
 	function addToPreview(): void {
 		try {
 			if (!createExpressionText.trim()) throw new Error('Expression is required.');
+			if (
+				createAction === 'block' &&
+				createBlockResponseType !== DEFAULT_BLOCK_RESPONSE_TYPE &&
+				!createBlockBody.trim()
+			) {
+				throw new Error('Response body is required when using a custom block response.');
+			}
 			previewRules = [...previewRules, buildCreateRule()];
 			showToast('ok', 'Rule added to preview.');
 		} catch (error) {
@@ -749,10 +859,11 @@
 		if (!selectedZoneId || previewRules.length === 0) return;
 		busy = true;
 		try {
+			const sanitizedRules = sanitizeRulesForSubmission(previewRules);
 			const response = await fetch(`/api/zones/${selectedZoneId}/rules`, {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ name: existingRulesetName, rules: previewRules })
+				body: JSON.stringify({ name: existingRulesetName, rules: sanitizedRules })
 			});
 			const data = (await response.json()) as RulesResponse;
 			if (!response.ok) throw new Error(data.error || 'Deploy failed');
@@ -777,7 +888,10 @@
 			const response = await fetch(`/api/zones/${selectedZoneId}/rules`, {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ name: loadData.name ?? existingRulesetName, rules: merged })
+				body: JSON.stringify({
+					name: loadData.name ?? existingRulesetName,
+					rules: sanitizeRulesForSubmission(merged)
+				})
 			});
 			const data = (await response.json()) as RulesResponse;
 			if (!response.ok) throw new Error(data.error || 'Deploy failed');
@@ -1228,17 +1342,13 @@
 												<!-- Block custom response (conditional) -->
 												{#if rule.action === 'block'}
 													<div class="panel stack">
-														<span class="muted">Custom Block Response (optional)</span>
+														<span class="muted">Block Response (optional)</span>
 														<div class="grid-2">
 															<label class="stack">
 																<span class="muted">Response type</span>
 																<select class="select"
-																	value={rule.action_parameters?.response?.content_type ?? 'text/html'}
-																	onchange={(e) => {
-																		rule.action_parameters ??= { response: {} };
-																		rule.action_parameters.response ??= {};
-																		rule.action_parameters.response.content_type = (e.currentTarget as HTMLSelectElement).value;
-																	}}
+																	value={getRuleBlockResponseType(rule)}
+																	onchange={(e) => onRuleBlockResponseTypeChange(rule, (e.currentTarget as HTMLSelectElement).value)}
 																>
 																	{#each BLOCK_RESPONSE_TYPES as rt}
 																		<option value={rt.value}>{rt.label}</option>
@@ -1248,24 +1358,19 @@
 															<label class="stack">
 																<span class="muted">Status code (400–499)</span>
 																<input class="input mono" type="number" min="400" max="499"
-																	value={rule.action_parameters?.response?.status_code ?? 403}
-																	oninput={(e) => {
-																		rule.action_parameters ??= { response: {} };
-																		rule.action_parameters.response ??= {};
-																		rule.action_parameters.response.status_code = parseInt((e.currentTarget as HTMLInputElement).value) || 403;
-																	}}
+																	value={getRuleBlockStatusCode(rule)}
+																	disabled={getRuleBlockResponseType(rule) === DEFAULT_BLOCK_RESPONSE_TYPE}
+																	oninput={(e) => onRuleBlockStatusCodeInput(rule, (e.currentTarget as HTMLInputElement).value)}
 																/>
 															</label>
 														</div>
 														<label class="stack">
 															<span class="muted">Response body</span>
 															<textarea class="textarea mono"
-																value={rule.action_parameters?.response?.content ?? ''}
-																oninput={(e) => {
-																	rule.action_parameters ??= { response: {} };
-																	rule.action_parameters.response ??= {};
-																	rule.action_parameters.response.content = (e.currentTarget as HTMLTextAreaElement).value;
-																}}
+																value={getRuleBlockBody(rule)}
+																disabled={getRuleBlockResponseType(rule) === DEFAULT_BLOCK_RESPONSE_TYPE}
+																placeholder={getRuleBlockResponseType(rule) === DEFAULT_BLOCK_RESPONSE_TYPE ? 'Uses Cloudflare default 403 block page.' : 'Your request was blocked.'}
+																oninput={(e) => onRuleBlockBodyInput(rule, (e.currentTarget as HTMLTextAreaElement).value)}
 															></textarea>
 														</label>
 													</div>
@@ -1416,7 +1521,7 @@
 
 			{#if createAction === 'block'}
 				<div class="panel stack">
-					<span class="muted">Custom Block Response (optional)</span>
+					<span class="muted">Block Response (optional)</span>
 					<div class="grid-2">
 						<label class="stack">
 							<span class="muted">Response type</span>
@@ -1428,12 +1533,12 @@
 						</label>
 						<label class="stack">
 							<span class="muted">Status code (400–499)</span>
-							<input class="input mono" type="number" min="400" max="499" bind:value={createBlockStatusCode} />
+							<input class="input mono" type="number" min="400" max="499" bind:value={createBlockStatusCode} disabled={createBlockResponseType === DEFAULT_BLOCK_RESPONSE_TYPE} />
 						</label>
 					</div>
 					<label class="stack">
 						<span class="muted">Response body</span>
-						<textarea class="textarea mono" bind:value={createBlockBody} placeholder="Your request was blocked."></textarea>
+						<textarea class="textarea mono" bind:value={createBlockBody} disabled={createBlockResponseType === DEFAULT_BLOCK_RESPONSE_TYPE} placeholder={createBlockResponseType === DEFAULT_BLOCK_RESPONSE_TYPE ? 'Uses Cloudflare default 403 block page.' : 'Your request was blocked.'}></textarea>
 					</label>
 				</div>
 			{/if}
