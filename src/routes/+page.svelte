@@ -1108,6 +1108,26 @@
 		}
 	}
 
+	async function saveRulesRaw(): Promise<void> {
+		if (!selectedZoneId) return;
+		busy = true;
+		try {
+			const sanitizedRules = sanitizeRulesForSubmission(existingRules);
+			const response = await fetch(`/api/zones/${selectedZoneId}/rules`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ name: existingRulesetName, rules: sanitizedRules })
+			});
+			const data = (await response.json()) as RulesResponse;
+			if (!response.ok) throw new Error(data.error || 'Save failed');
+			existingRules = data.rules || [];
+		} catch (error) {
+			showToast('error', error instanceof Error ? error.message : 'Save failed');
+		} finally {
+			busy = false;
+		}
+	}
+
 	async function saveExistingRules(): Promise<void> {
 		if (!selectedZoneId) return;
 		busy = true;
@@ -1144,7 +1164,7 @@
 		if (deleteConfirmIndex === null) return;
 		existingRules = existingRules.filter((_, i) => i !== deleteConfirmIndex);
 		deleteConfirmIndex = null;
-		showToast('ok', 'Rule removed locally. Click Save Changes to deploy deletion.');
+		saveRulesRaw();
 	}
 
 	// ─── Create tab ─────────────────────────────────────────
@@ -1504,9 +1524,6 @@
 				<button class="button secondary" type="button" onclick={loadExistingRules} disabled={busy || !selectedZoneId}>
 					Refresh
 				</button>
-				<button class="button save" type="button" onclick={saveExistingRules} disabled={busy || !selectedZoneId}>
-					Save Changes
-				</button>
 				<button class="button secondary" type="button" onclick={exportJson} disabled={existingRules.length === 0}>
 					Export JSON
 				</button>
@@ -1550,7 +1567,7 @@
 											<button
 												type="button"
 												class="toggle-btn {rule.enabled !== false ? 'on' : 'off'}"
-												onclick={() => { rule.enabled = rule.enabled !== false ? false : true; }}
+												onclick={() => { rule.enabled = rule.enabled !== false ? false : true; saveRulesRaw(); }}
 												title={rule.enabled !== false ? 'Enabled — click to disable' : 'Disabled — click to enable'}
 											>
 												<span class="toggle-track"><span class="toggle-thumb"></span></span>
