@@ -1,51 +1,45 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { WafRule, WafAction, ZoneSummary, CfList, RampartExportPayload } from '$lib/types';
+	import type {
+		WafRule,
+		WafAction,
+		ZoneSummary,
+		CfList,
+		RampartExportPayload,
+		MatchFieldOptionValue,
+		MatchOperatorOptionValue,
+		MatchJoin,
+		MatchEditorView,
+		SimpleMatchCondition
+	} from '$lib/types';
+	import {
+		WAF_ACTIONS,
+		BLOCK_RESPONSE_TYPES,
+		DEFAULT_BLOCK_RESPONSE_TYPE,
+		CUSTOM_BLOCK_RESPONSE_CONTENT_TYPES,
+		MATCH_FIELDS,
+		MATCH_OPERATORS,
+		DEFAULT_TEXT_OPERATORS,
+		DEFAULT_NUMERIC_OPERATORS,
+		FIELD_OPERATOR_OVERRIDES,
+		CONTINENT_VALUE_OPTIONS,
+		COUNTRY_VALUE_OPTIONS,
+		REQUEST_METHOD_VALUE_OPTIONS,
+		HTTP_VERSION_VALUE_OPTIONS,
+		type CustomBlockResponseContentType,
+		type BlockResponseTypeValue
+	} from '$lib/constants';
+	import {
+		escapeHtml,
+		escapeExpressionValue,
+		unescapeExpressionValue,
+		truncate,
+		actionLabel,
+		highlightExpression
+	} from '$lib/utils';
+	import BulkOperations from '$lib/components/BulkOperations.svelte';
 
-	type Tab = 'manage' | 'create' | 'copy';
-	type MatchEditorView = 'expression' | 'simple';
-	type MatchJoin = 'and' | 'or';
-	type MatchFieldOptionValue =
-		| 'http.request.full_uri'
-		| 'http.request.uri'
-		| 'http.request.uri.path'
-		| 'http.request.uri.query'
-		| 'ip.src.asnum'
-		| 'http.cookie'
-		| 'ip.src.country'
-		| 'ip.src.continent'
-		| 'http.host'
-		| 'ip.src'
-		| 'http.referer'
-		| 'http.request.method'
-		| 'ssl'
-		| 'http.request.version'
-		| 'http.user_agent'
-		| 'http.x_forwarded_for'
-		| 'cf.tls_client_auth.cert_verified'
-		| 'ip.src.is_in_european_union'
-		| 'cf.waf.score';
-	type MatchOperatorOptionValue =
-		| 'wildcard'
-		| 'strict_wildcard'
-		| 'equals'
-		| 'not_equals'
-		| 'contains'
-		| 'not_contains'
-		| 'matches_regex'
-		| 'not_matches_regex'
-		| 'starts_with'
-		| 'not_starts_with'
-		| 'ends_with'
-		| 'not_ends_with'
-		| 'less_than'
-		| 'less_than_or_equal'
-		| 'greater_than'
-		| 'greater_than_or_equal'
-		| 'in_set'
-		| 'not_in_set'
-		| 'in_list'
-		| 'not_in_list';
+	type Tab = 'manage' | 'create' | 'bulk';
 
 	interface MatchFieldOption {
 		label: string;
@@ -65,15 +59,6 @@
 		label: string;
 	}
 
-	interface SimpleMatchCondition {
-		id: number;
-		joinWithPrevious: MatchJoin;
-		field: MatchFieldOptionValue;
-		operator: MatchOperatorOptionValue;
-		value: string;
-		booleanToggleOn: boolean;
-	}
-
 	interface ApiError {
 		error?: string;
 	}
@@ -90,168 +75,6 @@
 	interface ExpressionValidateResponse extends ApiError {
 		valid?: boolean;
 	}
-
-	type CustomBlockResponseContentType = 'text/html' | 'text/plain' | 'application/json' | 'text/xml';
-	type BlockResponseTypeValue = 'default_waf_block_403' | CustomBlockResponseContentType;
-
-	const CUSTOM_BLOCK_RESPONSE_CONTENT_TYPES: CustomBlockResponseContentType[] = [
-		'text/html',
-		'text/plain',
-		'application/json',
-		'text/xml'
-	];
-
-	const DEFAULT_BLOCK_RESPONSE_TYPE: BlockResponseTypeValue = 'default_waf_block_403';
-
-	const WAF_ACTIONS: { value: WafAction; label: string }[] = [
-		{ value: 'block', label: 'Block' },
-		{ value: 'managed_challenge', label: 'Managed Challenge' },
-		{ value: 'challenge', label: 'Interactive Challenge' },
-		{ value: 'js_challenge', label: 'JS Challenge' },
-		{ value: 'skip', label: 'Skip' },
-		{ value: 'log', label: 'Log (Enterprise)' }
-	];
-
-	const BLOCK_RESPONSE_TYPES: { value: BlockResponseTypeValue; label: string }[] = [
-		{ value: DEFAULT_BLOCK_RESPONSE_TYPE, label: 'Default Cloudflare WAF block page (403)' },
-		{ value: 'text/html', label: 'Custom HTML' },
-		{ value: 'text/plain', label: 'Custom Text' },
-		{ value: 'application/json', label: 'Custom JSON' },
-		{ value: 'text/xml', label: 'Custom XML' }
-	];
-
-	const MATCH_FIELDS: MatchFieldOption[] = [
-		{ label: 'URI Full', value: 'http.request.full_uri' },
-		{ label: 'URI', value: 'http.request.uri' },
-		{ label: 'URI Path', value: 'http.request.uri.path' },
-		{ label: 'URI Query String', value: 'http.request.uri.query' },
-		{ label: 'AS Num', value: 'ip.src.asnum' },
-		{ label: 'Cookie', value: 'http.cookie' },
-		{ label: 'Country', value: 'ip.src.country' },
-		{ label: 'Continent', value: 'ip.src.continent' },
-		{ label: 'Hostname', value: 'http.host' },
-		{ label: 'IP Source Address', value: 'ip.src' },
-		{ label: 'Referer', value: 'http.referer' },
-		{ label: 'Request Method', value: 'http.request.method' },
-		{ label: 'SSL/HTTPS', value: 'ssl', booleanToggleOnly: true },
-		{ label: 'HTTP Version', value: 'http.request.version' },
-		{ label: 'User Agent', value: 'http.user_agent' },
-		{ label: 'X-Forwarded-For', value: 'http.x_forwarded_for' },
-		{ label: 'Client Certificate Verified', value: 'cf.tls_client_auth.cert_verified', booleanToggleOnly: true },
-		{ label: 'European Union', value: 'ip.src.is_in_european_union', booleanToggleOnly: true },
-		{ label: 'WAF Attack Score', value: 'cf.waf.score', numericOnly: true }
-	];
-
-	const MATCH_OPERATORS: MatchOperatorOption[] = [
-		{ label: 'wildcard', value: 'wildcard' },
-		{ label: 'strict wildcard', value: 'strict_wildcard' },
-		{ label: 'equals', value: 'equals' },
-		{ label: 'does not equal', value: 'not_equals' },
-		{ label: 'contains', value: 'contains' },
-		{ label: 'does not contain', value: 'not_contains' },
-		{ label: 'matches regex', value: 'matches_regex' },
-		{ label: 'does not match regex', value: 'not_matches_regex' },
-		{ label: 'starts with', value: 'starts_with' },
-		{ label: 'does not start with', value: 'not_starts_with' },
-		{ label: 'ends with', value: 'ends_with' },
-		{ label: 'does not end with', value: 'not_ends_with' },
-		{ label: 'less than', value: 'less_than', numericOnly: true },
-		{ label: 'less than or equal', value: 'less_than_or_equal', numericOnly: true },
-		{ label: 'greater than', value: 'greater_than', numericOnly: true },
-		{ label: 'greater than or equal', value: 'greater_than_or_equal', numericOnly: true },
-		{ label: 'is in set', value: 'in_set' },
-		{ label: 'is not in set', value: 'not_in_set' },
-		{ label: 'is in list', value: 'in_list' },
-		{ label: 'is not in list', value: 'not_in_list' }
-	];
-
-	const DEFAULT_TEXT_OPERATORS: MatchOperatorOptionValue[] = [
-		'wildcard',
-		'strict_wildcard',
-		'equals',
-		'not_equals',
-		'contains',
-		'not_contains',
-		'matches_regex',
-		'not_matches_regex',
-		'starts_with',
-		'not_starts_with',
-		'ends_with',
-		'not_ends_with',
-		'in_set',
-		'not_in_set',
-		'in_list',
-		'not_in_list'
-	];
-
-	const DEFAULT_NUMERIC_OPERATORS: MatchOperatorOptionValue[] = [
-		'equals',
-		'not_equals',
-		'less_than',
-		'less_than_or_equal',
-		'greater_than',
-		'greater_than_or_equal'
-	];
-
-	const CONTINENT_VALUE_OPTIONS: FieldValueOption[] = [
-		{ value: 'AF', label: 'Africa (AF)' },
-		{ value: 'AN', label: 'Antarctica (AN)' },
-		{ value: 'AS', label: 'Asia (AS)' },
-		{ value: 'EU', label: 'Europe (EU)' },
-		{ value: 'NA', label: 'North America (NA)' },
-		{ value: 'OC', label: 'Oceania (OC)' },
-		{ value: 'SA', label: 'South America (SA)' }
-	];
-
-	const REQUEST_METHOD_VALUE_OPTIONS: FieldValueOption[] = [
-		{ value: 'GET', label: 'GET' },
-		{ value: 'HEAD', label: 'HEAD' },
-		{ value: 'POST', label: 'POST' },
-		{ value: 'PUT', label: 'PUT' },
-		{ value: 'PATCH', label: 'PATCH' },
-		{ value: 'DELETE', label: 'DELETE' },
-		{ value: 'OPTIONS', label: 'OPTIONS' },
-		{ value: 'TRACE', label: 'TRACE' },
-		{ value: 'CONNECT', label: 'CONNECT' }
-	];
-
-	const HTTP_VERSION_VALUE_OPTIONS: FieldValueOption[] = [
-		{ value: 'HTTP/1.0', label: 'HTTP/1.0' },
-		{ value: 'HTTP/1.1', label: 'HTTP/1.1' },
-		{ value: 'HTTP/2', label: 'HTTP/2' },
-		{ value: 'HTTP/3', label: 'HTTP/3' }
-	];
-
-	const COUNTRY_VALUE_OPTIONS: FieldValueOption[] = (() => {
-		try {
-			const displayNames = new Intl.DisplayNames(['en'], { type: 'region' });
-			const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-			const options: FieldValueOption[] = [];
-
-			for (const first of letters) {
-				for (const second of letters) {
-					const code = `${first}${second}`;
-					const name = displayNames.of(code);
-					if (!name || name === code || /unknown region/i.test(name)) continue;
-					options.push({ value: code, label: `${name} (${code})` });
-				}
-			}
-
-			return options.sort((a, b) => a.label.localeCompare(b.label));
-		} catch {
-			return [];
-		}
-	})();
-
-	const FIELD_OPERATOR_OVERRIDES: Partial<Record<MatchFieldOptionValue, MatchOperatorOptionValue[]>> = {
-		'ip.src': ['equals', 'not_equals', 'in_set', 'not_in_set', 'in_list', 'not_in_list'],
-		'ip.src.country': ['equals', 'not_equals', 'in_set', 'not_in_set', 'in_list', 'not_in_list'],
-		'ip.src.continent': ['equals', 'not_equals', 'in_set', 'not_in_set', 'in_list', 'not_in_list'],
-		'ip.src.asnum': ['equals', 'not_equals', 'in_set', 'not_in_set', 'in_list', 'not_in_list'],
-		'http.request.method': ['equals', 'not_equals', 'in_set', 'not_in_set'],
-		'http.request.version': ['equals', 'not_equals', 'in_set', 'not_in_set'],
-		'cf.waf.score': DEFAULT_NUMERIC_OPERATORS
-	};
 
 	// ─── State ──────────────────────────────────────────────
 	const zones = $state<ZoneSummary[]>([]);
@@ -292,12 +115,7 @@
 	let existingExpressionValidationErrors = $state<Record<number, string>>({});
 	let existingRuleValidated = $state<Record<number, boolean>>({});
 
-	// Cross-zone copy
-	type CopyStatus = 'pending' | 'running' | 'ok' | 'error';
-	let copyTargetZoneIds = $state<Set<string>>(new Set());
-	let copySelection = $state<Set<number>>(new Set());
-	let copyTargetQuery = $state('');
-	let copyProgress = $state<Record<string, CopyStatus>>({});
+	// Bulk operations (state managed in BulkOperations component)
 
 	// Import
 	let showImportDialog = $state(false);
@@ -314,7 +132,6 @@
 	}
 
 	const filteredZones = $derived(getMatchingZones(zoneQuery));
-	const filteredCopyTargetZones = $derived(getMatchingZones(copyTargetQuery));
 	const selectedZoneName = $derived(zones.find((z) => z.id === selectedZoneId)?.name ?? '');
 
 	$effect(() => {
@@ -349,34 +166,8 @@
 		}, 4500);
 	}
 
-	function escapeHtml(value: string): string {
-		return value
-			.replace(/&/g, '&amp;')
-			.replace(/</g, '&lt;')
-			.replace(/>/g, '&gt;')
-			.replace(/"/g, '&quot;')
-			.replace(/'/g, '&#39;');
-	}
-
-	function escapeExpressionValue(input: string): string {
-		return input.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-	}
-
-	function unescapeExpressionValue(input: string): string {
-		return input.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-	}
-
 	function isIpSourceField(field: MatchFieldOptionValue): boolean {
 		return field === 'ip.src';
-	}
-
-	function truncate(text: string, max: number): string {
-		if (text.length <= max) return text;
-		return text.slice(0, max) + '…';
-	}
-
-	function actionLabel(action: WafAction): string {
-		return WAF_ACTIONS.find((a) => a.value === action)?.label ?? action;
 	}
 
 	function isCustomBlockResponseType(type: string | undefined): type is CustomBlockResponseContentType {
@@ -572,31 +363,7 @@
 		expandedRuleIndex = expandedRuleIndex === index ? null : index;
 	}
 
-	function highlightExpression(expression: string): string {
-		const regex = /(\$[A-Za-z0-9_]+)|(http\.[A-Za-z0-9_.]+|ip\.src[A-Za-z0-9_.]*|cf\.[A-Za-z0-9_.]+|ssl)|\b(not in|not|eq|ne|contains|matches|in|starts_with|ends_with|lt|le|gt|ge|wildcard|strict wildcard)\b|\b(and|or)\b/gi;
-		let out = '';
-		let lastIndex = 0;
 
-		for (const match of expression.matchAll(regex)) {
-			const index = match.index ?? 0;
-			out += escapeHtml(expression.slice(lastIndex, index));
-
-			if (match[1]) {
-				out += `<span class="token-list">${escapeHtml(match[1])}</span>`;
-			} else if (match[2]) {
-				out += `<span class="token-field">${escapeHtml(match[2])}</span>`;
-			} else if (match[3]) {
-				out += `<span class="token-operator">${escapeHtml(match[3])}</span>`;
-			} else if (match[4]) {
-				out += `<span class="token-logical">${escapeHtml(match[4])}</span>`;
-			}
-
-			lastIndex = index + match[0].length;
-		}
-
-		out += escapeHtml(expression.slice(lastIndex));
-		return out;
-	}
 
 	function syncExpressionScroll(index: number): void {
 		const input = expressionInputs[index];
@@ -1408,95 +1175,7 @@
 		}
 	}
 
-	// ─── Cross-zone copy ────────────────────────────────────
 
-	function toggleCopySelection(index: number): void {
-		const next = new Set(copySelection);
-		if (next.has(index)) next.delete(index);
-		else next.add(index);
-		copySelection = next;
-		copyProgress = {};
-	}
-
-	function selectAllForCopy(): void {
-		copySelection = new Set(existingRules.map((_, i) => i));
-		copyProgress = {};
-	}
-
-	function deselectAllForCopy(): void {
-		copySelection = new Set();
-		copyProgress = {};
-	}
-
-	function toggleCopyTargetZone(zoneId: string): void {
-		const next = new Set(copyTargetZoneIds);
-		if (next.has(zoneId)) next.delete(zoneId);
-		else next.add(zoneId);
-		copyTargetZoneIds = next;
-		copyProgress = {};
-	}
-
-	function selectAllCopyTargets(): void {
-		copyTargetZoneIds = new Set(
-			filteredCopyTargetZones.filter((z) => z.id !== selectedZoneId).map((z) => z.id)
-		);
-		copyProgress = {};
-	}
-
-	function deselectAllCopyTargets(): void {
-		copyTargetZoneIds = new Set();
-		copyProgress = {};
-	}
-
-	async function executeCopy(): Promise<void> {
-		if (copyTargetZoneIds.size === 0 || copySelection.size === 0) return;
-		busy = true;
-
-		const rulesToCopy = existingRules
-			.filter((_, i) => copySelection.has(i))
-			.map((rule) => {
-				const { id: _id, ref: _ref, ...rest } = rule;
-				return sanitizeRuleForSubmission(rest as WafRule);
-			});
-
-		// Initialise progress for all targets
-		const initialProgress: Record<string, CopyStatus> = {};
-		for (const id of copyTargetZoneIds) initialProgress[id] = 'pending';
-		copyProgress = initialProgress;
-
-		for (const targetId of copyTargetZoneIds) {
-			copyProgress = { ...copyProgress, [targetId]: 'running' };
-			try {
-				const loadRes = await fetch(`/api/zones/${targetId}/rules`);
-				const loadData = (await loadRes.json()) as RulesResponse;
-				if (!loadRes.ok) throw new Error(loadData.error || 'Failed to load target zone rules');
-
-				const merged = [...(loadData.rules ?? []), ...rulesToCopy];
-				const response = await fetch(`/api/zones/${targetId}/rules`, {
-					method: 'PUT',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ name: loadData.name ?? 'Custom rules', rules: merged })
-				});
-				const data = (await response.json()) as RulesResponse;
-				if (!response.ok) throw new Error(data.error || 'Copy failed');
-
-				copyProgress = { ...copyProgress, [targetId]: 'ok' };
-			} catch {
-				copyProgress = { ...copyProgress, [targetId]: 'error' };
-			}
-		}
-
-		const successCount = Object.values(copyProgress).filter((s) => s === 'ok').length;
-		const failCount = Object.values(copyProgress).filter((s) => s === 'error').length;
-
-		if (successCount > 0 && failCount === 0) {
-			showToast('ok', `Copied ${rulesToCopy.length} rule(s) to ${successCount} zone(s).`);
-		} else if (failCount > 0) {
-			showToast('error', `${successCount} zone(s) succeeded, ${failCount} failed — see details below.`);
-		}
-
-		busy = false;
-	}
 
 	// ─── Import / Export ────────────────────────────────────
 
@@ -1642,8 +1321,8 @@
 		<button type="button" class="button {activeTab === 'create' ? '' : 'secondary'}" onclick={() => (activeTab = 'create')}>
 			Create Rules
 		</button>
-		<button type="button" class="button {activeTab === 'copy' ? '' : 'secondary'}" onclick={() => (activeTab = 'copy')}>
-			Cross-Zone Copy
+		<button type="button" class="button {activeTab === 'bulk' ? '' : 'secondary'}" onclick={() => (activeTab = 'bulk')}>
+			Bulk Operations
 		</button>
 	</div>
 
@@ -2166,88 +1845,17 @@
 			{/if}
 		</div>
 
-	<!-- ─── COPY TAB ────────────────────────────────────── -->
-	{:else if activeTab === 'copy'}
-		<div class="stack">
-			<p class="muted">Copy selected rules from the current zone to another zone. Rules are appended to the target zone's existing rules.</p>
-
-			{#if existingRules.length === 0}
-				<p class="muted">No rules loaded. Switch to the <button class="button secondary" style="display:inline;padding:0.1rem 0.4rem;font-size:0.8rem;" type="button" onclick={() => (activeTab = 'manage')}>Manage</button> tab to load rules first.</p>
-			{:else}
-				<div class="row">
-					<button class="button secondary" type="button" onclick={selectAllForCopy}>Select All</button>
-					<button class="button secondary" type="button" onclick={deselectAllForCopy}>Deselect All</button>
-					<span class="label">{copySelection.size} of {existingRules.length} selected</span>
-				</div>
-
-				<div style="overflow-x: auto;">
-					<table>
-						<thead>
-							<tr>
-								<th style="width: 5%;"></th>
-								<th style="width: 5%;">#</th>
-								<th style="width: 30%;">Name</th>
-								<th style="width: 40%;">Expression</th>
-								<th style="width: 15%;">Action</th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each existingRules as rule, index}
-								<tr style="cursor: pointer;" onclick={() => toggleCopySelection(index)}>
-									<td><input type="checkbox" checked={copySelection.has(index)} /></td>
-									<td>{index + 1}</td>
-									<td>{rule.description || '(unnamed)'}</td>
-									<td class="mono" style="font-size: 0.68rem;">{truncate(rule.expression || '', 50)}</td>
-									<td><span class="action-badge {rule.action}">{actionLabel(rule.action)}</span></td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				</div>
-
-				<div class="stack" style="gap: 0.3rem;">
-					<label class="muted" for="copy-target-filter">Target zone filter</label>
-					<input id="copy-target-filter" class="input" type="text" placeholder="Filter zones…" bind:value={copyTargetQuery} />
-				</div>
-				<div class="stack" style="gap: 0.3rem;">
-					<div class="row">
-						<span class="label">Target zones ({copyTargetZoneIds.size} selected)</span>
-						<button class="button secondary" style="font-size: 0.68rem; padding: 0.18rem 0.45rem;" type="button" onclick={selectAllCopyTargets}>All</button>
-						<button class="button secondary" style="font-size: 0.68rem; padding: 0.18rem 0.45rem;" type="button" onclick={deselectAllCopyTargets}>None</button>
-					</div>
-					<div class="copy-target-list">
-						{#each filteredCopyTargetZones.filter((z) => z.id !== selectedZoneId) as zone (zone.id)}
-							<label class="copy-target-item">
-								<input type="checkbox" checked={copyTargetZoneIds.has(zone.id)} onchange={() => toggleCopyTargetZone(zone.id)} />
-								<span>{zone.name}</span>
-								{#if copyProgress[zone.id] === 'pending'}
-									<span style="margin-left: auto; font-size: 0.72rem; color: oklch(0.6 0 0);">queued</span>
-								{:else if copyProgress[zone.id] === 'running'}
-									<span style="margin-left: auto; font-size: 0.72rem; color: oklch(0.75 0.1 250);">copying…</span>
-								{:else if copyProgress[zone.id] === 'ok'}
-									<span style="margin-left: auto; font-size: 0.72rem; color: oklch(0.78 0.18 140);">✓ done</span>
-								{:else if copyProgress[zone.id] === 'error'}
-									<span style="margin-left: auto; font-size: 0.72rem; color: oklch(0.65 0.22 20);">✗ failed</span>
-								{/if}
-							</label>
-						{/each}
-						{#if filteredCopyTargetZones.filter((z) => z.id !== selectedZoneId).length === 0}
-							<span class="label">No matching zones</span>
-						{/if}
-					</div>
-				</div>
-
-				<div class="row">
-					<button class="button" type="button" onclick={executeCopy} disabled={busy || copyTargetZoneIds.size === 0 || copySelection.size === 0}>
-						{#if busy}
-							Copying… ({Object.values(copyProgress).filter((s) => s === 'ok' || s === 'error').length} / {copyTargetZoneIds.size})
-						{:else}
-							Copy {copySelection.size} Rule(s) to {copyTargetZoneIds.size} Zone(s)
-						{/if}
-					</button>
-				</div>
-			{/if}
-		</div>
+	<!-- ─── BULK OPERATIONS TAB ──────────────────────────── -->
+	{:else if activeTab === 'bulk'}
+		<BulkOperations
+			{zones}
+			{selectedZoneId}
+			sourceRules={existingRules}
+			sourceRulesetName={existingRulesetName}
+			{cfLists}
+			{cfListsLoading}
+			onshowtoast={showToast}
+		/>
 	{/if}
 </section>
 

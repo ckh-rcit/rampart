@@ -1,18 +1,30 @@
 # Rampart
 
-A Cloudflare WAF Custom Rules manager built for bulk operations across zones, built with SvelteKit and deployed on Cloudflare Pages.
+A Cloudflare WAF Custom Rules manager focused on fast rule editing and safe bulk operations across zones. Built with SvelteKit and deployed on Cloudflare Pages.
 
-Rampart provides a single interface for viewing, editing, creating, importing, exporting, and copying firewall rules between zones with a visual expression builder and cross-zone copy support.
+Rampart provides a single interface for viewing, editing, creating, importing, exporting, copying, removing, and pushing custom firewall rules between zones with an expression editor and Simple View builder.
 
 ## Features
 
-- View, create, edit, and delete WAF custom rules for any zone
-- Expression editor with syntax highlighting and a visual field/operator/value builder
-- Support for all WAF actions: Block, Managed Challenge, JS Challenge, Interactive Challenge, Skip, Log
-- Configure custom block responses (status code, content type, body)
-- Cross-zone rule copying with multi-zone target selection
-- Import and export rules as JSON or plain text
-- Cloudflare Lists integration with automatic list loading for IP, hostname, and ASN lists
+- Manage per-zone rules
+   - View, create, edit, validate, and delete WAF custom rules
+   - Expression View with syntax highlighting
+   - Simple View (field/operator/value builder with AND/OR joins)
+   - Tag-chip input for `ip.src` set operators (`in_set`, `not_in_set`)
+   - Live compatibility checks (for example CIDR/operator combinations, list names, ASN numeric values)
+- Bulk Operations tab
+   - Copy Rules: copy selected rules from source zone to selected target zones
+   - Remove by Name: search all zones, preview matches, and remove with irreversible confirmation
+   - Create and Push: build one new rule (Expression or Simple View), validate once, push to many zones
+- WAF rule behavior
+   - Supports actions: Block, Managed Challenge, JS Challenge, Interactive Challenge, Skip, Log
+   - Custom block responses (status code, content type, body)
+- Import and export
+   - Export JSON
+   - Export plain expressions (`.txt`)
+   - Import from JSON or expression text
+- Cloudflare Lists integration
+   - Account list loading for list operators (`in_list`, `not_in_list`)
 
 ## Tech Stack
 
@@ -31,6 +43,12 @@ Rampart provides a single interface for viewing, editing, creating, importing, e
 1. Install dependencies:
 
    ```sh
+   npm install
+   ```
+
+   or
+
+   ```sh
    bun install
    ```
 
@@ -43,12 +61,37 @@ Rampart provides a single interface for viewing, editing, creating, importing, e
 3. Start the development server:
 
    ```sh
+   npm run dev
+   ```
+
+   or
+
+   ```sh
    bun run dev
    ```
+
+## Validation
+
+```sh
+npm run check
+```
+
+or
+
+```sh
+bun run check
+```
 
 ## Deployment
 
 Build and deploy to Cloudflare Pages:
+
+```sh
+npm run build
+wrangler pages deploy .svelte-kit/cloudflare
+```
+
+or
 
 ```sh
 bun run build
@@ -75,13 +118,25 @@ wrangler pages secret put CLOUDFLARE_API_TOKEN
 src/
   lib/
     cloudflare.ts   # Cloudflare API client
-    types.ts        # TypeScript interfaces
+      types.ts        # Shared TypeScript interfaces and editor types
+      constants.ts    # Shared constants (actions, match fields/operators, value options)
+      utils.ts        # Pure helpers (escaping, labels, highlighting helpers)
+      components/
+         BulkOperations.svelte  # Bulk copy/remove/create workflows
   routes/
     +page.svelte    # Main application page
     +layout.svelte  # App shell and layout
     layout.css      # Global styles
-    api/            # Server-side API proxy routes
+      api/
+         lists/+server.ts                # Account filter lists proxy
+         zones/+server.ts                # Zones lookup proxy
+         zones/[zoneId]/rules/+server.ts # Zone custom rules read/write proxy
 ```
+
+## Notes
+
+- The app validates expressions against Cloudflare before deploy/push operations.
+- Remove by Name and bulk changes are designed to show preview/progress before destructive operations complete.
 
 ## License
 
