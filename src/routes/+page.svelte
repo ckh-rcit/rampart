@@ -364,6 +364,10 @@
 		return input.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
 	}
 
+	function isIpSourceField(field: MatchFieldOptionValue): boolean {
+		return field === 'ip.src';
+	}
+
 	function truncate(text: string, max: number): string {
 		if (text.length <= max) return text;
 		return text.slice(0, max) + '…';
@@ -492,7 +496,14 @@
 			});
 			const data = (await response.json()) as ExpressionValidateResponse;
 			if (!response.ok || data.valid === false) {
-				return data.error || 'Expression is invalid.';
+				const rawError = data.error || 'Expression is invalid.';
+				if (
+					rawError.includes('expected IP address character') &&
+					/\bip\.src\s+(eq|ne)\s+"/i.test(trimmed)
+				) {
+					return `${rawError} Tip: use unquoted IP/CIDR values for ip.src (example: ip.src ne 158.61.0.0/16).`;
+				}
+				return rawError;
 			}
 			return null;
 		} catch {
@@ -668,6 +679,7 @@
 
 	function buildClauseFromSimpleCondition(condition: SimpleMatchCondition): string {
 		const field = condition.field;
+		const rawValue = (condition.value ?? '').trim();
 
 		if (isBooleanToggleField(field)) {
 			return condition.booleanToggleOn ? `(${field})` : `(not ${field})`;
@@ -681,8 +693,10 @@
 			case 'strict_wildcard':
 				return `(${field} strict wildcard r"${escaped}")`;
 			case 'equals':
+				if (isIpSourceField(field)) return `(${field} eq ${rawValue})`;
 				return `(${field} eq "${escaped}")`;
 			case 'not_equals':
+				if (isIpSourceField(field)) return `(${field} ne ${rawValue})`;
 				return `(${field} ne "${escaped}")`;
 			case 'contains':
 				return `(${field} contains "${escaped}")`;
@@ -775,6 +789,16 @@
 		if (numeric) {
 			const map: Record<string, MatchOperatorOptionValue> = { lt: 'less_than', le: 'less_than_or_equal', gt: 'greater_than', ge: 'greater_than_or_equal' };
 			return { field: numeric[1] as MatchFieldOptionValue, operator: map[numeric[2]], value: numeric[3], booleanToggleOn: true };
+		}
+
+		const ipDirect = trimmed.match(/^\((ip\.src)\s+(eq|ne)\s+([A-Fa-f0-9:.]+(?:\/\d{1,3})?)\)$/);
+		if (ipDirect) {
+			return {
+				field: ipDirect[1] as MatchFieldOptionValue,
+				operator: ipDirect[2] === 'eq' ? 'equals' : 'not_equals',
+				value: ipDirect[3],
+				booleanToggleOn: true
+			};
 		}
 
 		const direct = trimmed.match(
