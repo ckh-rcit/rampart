@@ -60,6 +60,11 @@
 		numericOnly?: boolean;
 	}
 
+	interface FieldValueOption {
+		value: string;
+		label: string;
+	}
+
 	interface SimpleMatchCondition {
 		id: number;
 		joinWithPrevious: MatchJoin;
@@ -187,6 +192,50 @@
 		'greater_than',
 		'greater_than_or_equal'
 	];
+
+	const CONTINENT_VALUE_OPTIONS: FieldValueOption[] = [
+		{ value: 'AF', label: 'Africa (AF)' },
+		{ value: 'AN', label: 'Antarctica (AN)' },
+		{ value: 'AS', label: 'Asia (AS)' },
+		{ value: 'EU', label: 'Europe (EU)' },
+		{ value: 'NA', label: 'North America (NA)' },
+		{ value: 'OC', label: 'Oceania (OC)' },
+		{ value: 'SA', label: 'South America (SA)' }
+	];
+
+	const REQUEST_METHOD_VALUE_OPTIONS: FieldValueOption[] = [
+		{ value: 'GET', label: 'GET' },
+		{ value: 'HEAD', label: 'HEAD' },
+		{ value: 'POST', label: 'POST' },
+		{ value: 'PUT', label: 'PUT' },
+		{ value: 'PATCH', label: 'PATCH' },
+		{ value: 'DELETE', label: 'DELETE' },
+		{ value: 'OPTIONS', label: 'OPTIONS' },
+		{ value: 'TRACE', label: 'TRACE' },
+		{ value: 'CONNECT', label: 'CONNECT' }
+	];
+
+	const HTTP_VERSION_VALUE_OPTIONS: FieldValueOption[] = [
+		{ value: 'HTTP/1.0', label: 'HTTP/1.0' },
+		{ value: 'HTTP/1.1', label: 'HTTP/1.1' },
+		{ value: 'HTTP/2', label: 'HTTP/2' },
+		{ value: 'HTTP/3', label: 'HTTP/3' }
+	];
+
+	const COUNTRY_VALUE_OPTIONS: FieldValueOption[] = (() => {
+		const intl = Intl as unknown as { supportedValuesOf?: (key: string) => string[] };
+		if (typeof intl.supportedValuesOf !== 'function') return [];
+
+		const displayNames = new Intl.DisplayNames(['en'], { type: 'region' });
+		return intl
+			.supportedValuesOf('region')
+			.filter((code) => /^[A-Z]{2}$/.test(code))
+			.map((code) => {
+				const name = displayNames.of(code) ?? code;
+				return { value: code, label: `${name} (${code})` };
+			})
+			.sort((a, b) => a.label.localeCompare(b.label));
+	})();
 
 	const FIELD_OPERATOR_OVERRIDES: Partial<Record<MatchFieldOptionValue, MatchOperatorOptionValue[]>> = {
 		'ip.src': ['equals', 'not_equals', 'in_set', 'not_in_set', 'in_list', 'not_in_list'],
@@ -567,6 +616,23 @@
 
 	function isOperatorAllowedForField(field: MatchFieldOptionValue, operator: MatchOperatorOptionValue): boolean {
 		return getAllowedOperatorValuesForField(field).includes(operator);
+	}
+
+	function getFieldValueOptions(field: MatchFieldOptionValue, operator: MatchOperatorOptionValue): FieldValueOption[] {
+		if (isBooleanToggleField(field) || isSetOperator(operator) || isListOperator(operator)) return [];
+
+		switch (field) {
+			case 'ip.src.country':
+				return COUNTRY_VALUE_OPTIONS;
+			case 'ip.src.continent':
+				return CONTINENT_VALUE_OPTIONS;
+			case 'http.request.method':
+				return REQUEST_METHOD_VALUE_OPTIONS;
+			case 'http.request.version':
+				return HTTP_VERSION_VALUE_OPTIONS;
+			default:
+				return [];
+		}
 	}
 
 	function simpleValuePlaceholder(op: MatchOperatorOptionValue): string {
@@ -1588,6 +1654,16 @@
 																					</select>
 																				{/if}
 																			</label>
+																		{:else if getFieldValueOptions(condition.field, condition.operator).length > 0}
+																			<label class="stack">
+																				<span class="label">Value</span>
+																				<select class="select mono" bind:value={condition.value} onchange={() => onSimpleValueChange(index)}>
+																					<option value="">Select a value…</option>
+																					{#each getFieldValueOptions(condition.field, condition.operator) as option}
+																						<option value={option.value}>{option.label}</option>
+																					{/each}
+																				</select>
+																			</label>
 																		{:else}
 																			<label class="stack">
 																				<span class="label">Value</span>
@@ -1603,8 +1679,8 @@
 															</div>
 
 															<div class="row">
-																<button class="button secondary" type="button" onclick={() => addSimpleCondition(index, 'and')}>Add AND</button>
-																<button class="button secondary" type="button" onclick={() => addSimpleCondition(index, 'or')}>Add OR</button>
+																<button class="button secondary" type="button" onclick={() => addSimpleCondition(index, 'and')}>AND</button>
+																<button class="button" type="button" onclick={() => addSimpleCondition(index, 'or')}>OR</button>
 															</div>
 														{/if}
 													{/if}
@@ -1787,6 +1863,16 @@
 												</select>
 											{/if}
 										</label>
+										{:else if getFieldValueOptions(condition.field, condition.operator).length > 0}
+											<label class="stack">
+												<span class="label">Value</span>
+												<select class="select mono" bind:value={condition.value} onchange={() => onSimpleValueChange(CREATE_EDITOR_INDEX)}>
+													<option value="">Select a value…</option>
+													{#each getFieldValueOptions(condition.field, condition.operator) as option}
+														<option value={option.value}>{option.label}</option>
+													{/each}
+												</select>
+											</label>
 									{:else}
 										<label class="stack">
 											<span class="label">Value</span>
@@ -1802,8 +1888,8 @@
 						</div>
 
 						<div class="row">
-							<button class="button secondary" type="button" onclick={() => addSimpleCondition(CREATE_EDITOR_INDEX, 'and')}>Add AND</button>
-							<button class="button secondary" type="button" onclick={() => addSimpleCondition(CREATE_EDITOR_INDEX, 'or')}>Add OR</button>
+							<button class="button secondary" type="button" onclick={() => addSimpleCondition(CREATE_EDITOR_INDEX, 'and')}>AND</button>
+							<button class="button" type="button" onclick={() => addSimpleCondition(CREATE_EDITOR_INDEX, 'or')}>OR</button>
 						</div>
 					{/if}
 				{/if}
