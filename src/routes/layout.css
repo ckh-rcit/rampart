@@ -449,6 +449,78 @@ details > summary {
 	color: oklch(0.88 0.12 50);
 }
 
+/* ── Tag chip input ───────────────────────────────────────── */
+
+.tag-input-container {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 5px;
+	padding: 5px 8px;
+	min-height: 2.15rem;
+	background: oklch(0.15 0 0 / 0.92);
+	border: 1px solid var(--stroke);
+	border-radius: 4px;
+	cursor: text;
+	transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.tag-input-container:focus-within {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 1px oklch(0.7 0.16 50 / 0.32);
+}
+
+.tag-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	padding: 2px 6px 2px 9px;
+	background: oklch(0.24 0.06 230);
+	border: 1px solid oklch(0.42 0.09 230);
+	border-radius: 999px;
+	font-size: 0.75rem;
+	color: oklch(0.88 0.07 230);
+	white-space: nowrap;
+	line-height: 1.4;
+}
+
+.tag-chip-text {
+	font-family: 'JetBrains Mono', monospace;
+}
+
+.tag-chip-remove {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 14px;
+	height: 14px;
+	padding: 0;
+	background: none;
+	border: none;
+	cursor: pointer;
+	color: oklch(0.65 0.06 230);
+	font-size: 0.9rem;
+	line-height: 1;
+	border-radius: 999px;
+	transition: color 0.1s, background 0.1s;
+}
+
+.tag-chip-remove:hover {
+	color: oklch(0.95 0 0);
+	background: oklch(0.35 0.08 230 / 0.6);
+}
+
+.tag-input-field {
+	flex: 1;
+	min-width: 130px;
+	border: none;
+	background: transparent;
+	outline: none;
+	color: var(--text);
+	font-size: 0.78rem;
+	padding: 1px 0;
+}
+
 * {
 	scrollbar-width: thin;
 	scrollbar-color: oklch(0.42 0 0) oklch(0.16 0 0);

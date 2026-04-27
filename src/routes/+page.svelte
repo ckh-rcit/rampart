@@ -275,6 +275,8 @@
 	let matchEditorViews = $state<Record<number, MatchEditorView>>({});
 	let simpleConditionsByRule = $state<Record<number, SimpleMatchCondition[]>>({});
 	let simpleParseErrorsByRule = $state<Record<number, string>>({});
+	let simpleValidationErrorsByRule = $state<Record<number, string>>({});
+	let tagInputByCondition = $state<Record<number, string>>({});
 	let simpleConditionSeed = 0;
 	const CREATE_EDITOR_INDEX = -1;
 
@@ -620,6 +622,43 @@
 		return op === 'in_set' || op === 'not_in_set';
 	}
 
+	function isTagInputField(field: MatchFieldOptionValue, operator: MatchOperatorOptionValue): boolean {
+		return field === 'ip.src' && isSetOperator(operator);
+	}
+
+	function getTagsFromCondition(condition: SimpleMatchCondition): string[] {
+		return (condition.value ?? '').split(/\s+/).filter(Boolean);
+	}
+
+	function addTagToCondition(condition: SimpleMatchCondition, editorIndex: number, raw: string): void {
+		const newTokens = raw.split(/[\s,]+/).map((t) => t.trim()).filter(Boolean);
+		if (newTokens.length === 0) return;
+		const existing = getTagsFromCondition(condition);
+		const seen = new Set(existing);
+		for (const t of newTokens) {
+			if (!seen.has(t)) { existing.push(t); seen.add(t); }
+		}
+		condition.value = existing.join(' ');
+		tagInputByCondition[condition.id] = '';
+		onSimpleValueChange(editorIndex);
+	}
+
+	function removeTagFromCondition(condition: SimpleMatchCondition, editorIndex: number, tag: string): void {
+		condition.value = getTagsFromCondition(condition).filter((t) => t !== tag).join(' ');
+		onSimpleValueChange(editorIndex);
+	}
+
+	function onTagInputKeydown(e: KeyboardEvent, condition: SimpleMatchCondition, editorIndex: number): void {
+		const input = tagInputByCondition[condition.id] ?? '';
+		if ((e.key === 'Enter' || e.key === ',' || e.key === 'Tab' || e.key === ' ') && input.trim()) {
+			e.preventDefault();
+			addTagToCondition(condition, editorIndex, input);
+		} else if (e.key === 'Backspace' && !input) {
+			const tags = getTagsFromCondition(condition);
+			if (tags.length > 0) removeTagFromCondition(condition, editorIndex, tags[tags.length - 1]);
+		}
+	}
+
 	function getAllowedOperatorValuesForField(field: MatchFieldOptionValue): MatchOperatorOptionValue[] {
 		if (isBooleanToggleField(field)) return [];
 		const overridden = FIELD_OPERATOR_OVERRIDES[field];
@@ -662,6 +701,69 @@
 	function nextSimpleConditionId(): number {
 		simpleConditionSeed += 1;
 		return simpleConditionSeed;
+	}
+
+	function isCidrValue(value: string): boolean {
+		const trimmed = value.trim();
+		if (!trimmed.includes('/')) return false;
+		const match = trimmed.match(/^([A-Fa-f0-9:.]+)\/(\d{1,3})$/);
+		if (!match) return false;
+		const prefix = Number(match[2]);
+		if (match[1].includes(':')) return prefix >= 0 && prefix <= 128;
+		return prefix >= 0 && prefix <= 32;
+	}
+
+	function getSimpleConditionCompatibilityError(condition: SimpleMatchCondition): string | null {
+		const value = (condition.value ?? '').trim();
+		if (isBooleanToggleField(condition.field)) return null;
+
+		// CIDR with eq/ne on ip.src — should use in_set
+		if (
+			condition.field === 'ip.src' &&
+			(condition.operator === 'equals' || condition.operator === 'not_equals') &&
+			value && isCidrValue(value)
+		) {
+			return "CIDR ranges can only be used with 'in' operators. Use in set / not in set for ip.src CIDR ranges.";
+		}
+
+		// Empty set — must have at least one value
+		if (isSetOperator(condition.operator) && !value) {
+			return 'Add at least one value to the set.';
+		}
+
+		// AS number must be numeric
+		if (condition.field === 'ip.src.asnum') {
+			if ((condition.operator === 'equals' || condition.operator === 'not_equals') && value && !/^\d+$/.test(value)) {
+				return 'AS numbers must be numeric (e.g. 13335 for Cloudflare).';
+			}
+			if (isSetOperator(condition.operator) && value) {
+				const invalid = value.split(/\s+/).filter(Boolean).find((t) => !/^\d+$/.test(t));
+				if (invalid) return `"${invalid}" is not a valid AS number — AS numbers must be numeric digits only.`;
+			}
+		}
+
+		// List name format
+		if (isListOperator(condition.operator) && value && !/^[A-Za-z0-9_-]+$/.test(value)) {
+			return 'List name can only contain letters, numbers, underscores, and hyphens.';
+		}
+
+		return null;
+	}
+
+	function updateSimpleValidationError(index: number): void {
+		const conditions = simpleConditionsByRule[index] ?? [];
+		for (const condition of conditions) {
+			const message = getSimpleConditionCompatibilityError(condition);
+			if (message) {
+				simpleValidationErrorsByRule[index] = message;
+				return;
+			}
+		}
+
+		if (!simpleValidationErrorsByRule[index]) return;
+		const next = { ...simpleValidationErrorsByRule };
+		delete next[index];
+		simpleValidationErrorsByRule = next;
 	}
 
 	function defaultSimpleCondition(joinWithPrevious: MatchJoin = 'and'): SimpleMatchCondition {
@@ -765,6 +867,7 @@
 			})
 			.join(' ');
 
+		updateSimpleValidationError(index);
 		setExpressionForEditor(index, expression);
 	}
 
@@ -988,6 +1091,7 @@
 		if (!expression) {
 			simpleParseErrorsByRule[index] = '';
 			simpleConditionsByRule[index] = [defaultSimpleCondition()];
+			updateSimpleValidationError(index);
 			return;
 		}
 
@@ -996,10 +1100,12 @@
 			simpleParseErrorsByRule[index] =
 				'This expression cannot be represented in Simple View. Switch to Expression View to edit it directly.';
 			simpleConditionsByRule[index] = [defaultSimpleCondition()];
+			updateSimpleValidationError(index);
 			return;
 		}
 		simpleParseErrorsByRule[index] = '';
 		simpleConditionsByRule[index] = parsed;
+		updateSimpleValidationError(index);
 	}
 
 	function setMatchEditorView(index: number, view: MatchEditorView): void {
@@ -1654,6 +1760,9 @@
 																</button>
 															</div>
 														{/if}
+														{#if simpleValidationErrorsByRule[index]}
+															<div class="status error">{simpleValidationErrorsByRule[index]}</div>
+														{/if}
 
 														{#if simpleConditionsByRule[index]}
 															<div class="stack">
@@ -1721,6 +1830,27 @@
 																						<option value={option.value}>{option.label}</option>
 																					{/each}
 																				</select>
+																			</label>
+																		{:else if isTagInputField(condition.field, condition.operator)}
+																			<label class="stack">
+																				<span class="label">Value</span>
+																				<div class="tag-input-container">
+																					{#each getTagsFromCondition(condition) as tag}
+																						<span class="tag-chip">
+																							<span class="tag-chip-text">{tag}</span>
+																							<button type="button" class="tag-chip-remove" onclick={() => removeTagFromCondition(condition, index, tag)} aria-label="Remove {tag}">×</button>
+																						</span>
+																					{/each}
+																					<input
+																						class="tag-input-field mono"
+																						type="text"
+																						value={tagInputByCondition[condition.id] ?? ''}
+																						oninput={(e) => { tagInputByCondition[condition.id] = (e.target as HTMLInputElement).value; }}
+																						onkeydown={(e) => onTagInputKeydown(e, condition, index)}
+																						onblur={(e) => { const v = (e.target as HTMLInputElement).value.trim(); if (v) { addTagToCondition(condition, index, v); (e.target as HTMLInputElement).value = ''; } }}
+																						placeholder={getTagsFromCondition(condition).length === 0 ? 'e.g. 192.0.2.0 or 203.0.113.0/24' : ''}
+																					/>
+																				</div>
 																			</label>
 																		{:else}
 																			<label class="stack">
@@ -1863,6 +1993,9 @@
 							</button>
 						</div>
 					{/if}
+					{#if simpleValidationErrorsByRule[CREATE_EDITOR_INDEX]}
+						<div class="status error">{simpleValidationErrorsByRule[CREATE_EDITOR_INDEX]}</div>
+					{/if}
 
 					{#if simpleConditionsByRule[CREATE_EDITOR_INDEX]}
 						<div class="stack">
@@ -1932,6 +2065,27 @@
 													{/each}
 												</select>
 											</label>
+									{:else if isTagInputField(condition.field, condition.operator)}
+										<label class="stack">
+											<span class="label">Value</span>
+											<div class="tag-input-container">
+												{#each getTagsFromCondition(condition) as tag}
+													<span class="tag-chip">
+														<span class="tag-chip-text">{tag}</span>
+														<button type="button" class="tag-chip-remove" onclick={() => removeTagFromCondition(condition, CREATE_EDITOR_INDEX, tag)} aria-label="Remove {tag}">×</button>
+													</span>
+												{/each}
+												<input
+													class="tag-input-field mono"
+													type="text"
+													value={tagInputByCondition[condition.id] ?? ''}
+													oninput={(e) => { tagInputByCondition[condition.id] = (e.target as HTMLInputElement).value; }}
+													onkeydown={(e) => onTagInputKeydown(e, condition, CREATE_EDITOR_INDEX)}
+													onblur={(e) => { const v = (e.target as HTMLInputElement).value.trim(); if (v) { addTagToCondition(condition, CREATE_EDITOR_INDEX, v); (e.target as HTMLInputElement).value = ''; } }}
+													placeholder={getTagsFromCondition(condition).length === 0 ? 'e.g. 192.0.2.0 or 203.0.113.0/24' : ''}
+												/>
+											</div>
+										</label>
 									{:else}
 										<label class="stack">
 											<span class="label">Value</span>
