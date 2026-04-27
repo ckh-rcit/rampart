@@ -1526,15 +1526,16 @@
 																/>
 															</label>
 														</div>
+														{#if getRuleBlockResponseType(rule) !== DEFAULT_BLOCK_RESPONSE_TYPE}
 														<label class="stack">
 															<span class="muted">Response body</span>
 															<textarea class="textarea mono"
 																value={getRuleBlockBody(rule)}
-																disabled={getRuleBlockResponseType(rule) === DEFAULT_BLOCK_RESPONSE_TYPE}
-																placeholder={getRuleBlockResponseType(rule) === DEFAULT_BLOCK_RESPONSE_TYPE ? 'Uses Cloudflare default 403 block page.' : 'Your request was blocked.'}
+																placeholder="Your request was blocked."
 																oninput={(e) => onRuleBlockBodyInput(rule, (e.currentTarget as HTMLTextAreaElement).value)}
 															></textarea>
 														</label>
+														{/if}
 													</div>
 												{/if}
 											</div>
@@ -1702,11 +1703,12 @@
 							<input class="input mono" type="number" min="400" max="499" bind:value={createBlockStatusCode} disabled={createBlockResponseType === DEFAULT_BLOCK_RESPONSE_TYPE} />
 						</label>
 					</div>
-					<label class="stack">
-						<span class="muted">Response body</span>
-						<textarea class="textarea mono" bind:value={createBlockBody} disabled={createBlockResponseType === DEFAULT_BLOCK_RESPONSE_TYPE} placeholder={createBlockResponseType === DEFAULT_BLOCK_RESPONSE_TYPE ? 'Uses Cloudflare default 403 block page.' : 'Your request was blocked.'}></textarea>
-					</label>
-				</div>
+				{#if createBlockResponseType !== DEFAULT_BLOCK_RESPONSE_TYPE}
+				<label class="stack">
+					<span class="muted">Response body</span>
+					<textarea class="textarea mono" bind:value={createBlockBody} placeholder="Your request was blocked."></textarea>
+				</label>
+				{/if}
 			{/if}
 
 			<div class="row">
