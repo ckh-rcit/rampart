@@ -160,6 +160,44 @@
 		{ label: 'is not in list', value: 'not_in_list' }
 	];
 
+	const DEFAULT_TEXT_OPERATORS: MatchOperatorOptionValue[] = [
+		'wildcard',
+		'strict_wildcard',
+		'equals',
+		'not_equals',
+		'contains',
+		'not_contains',
+		'matches_regex',
+		'not_matches_regex',
+		'starts_with',
+		'not_starts_with',
+		'ends_with',
+		'not_ends_with',
+		'in_set',
+		'not_in_set',
+		'in_list',
+		'not_in_list'
+	];
+
+	const DEFAULT_NUMERIC_OPERATORS: MatchOperatorOptionValue[] = [
+		'equals',
+		'not_equals',
+		'less_than',
+		'less_than_or_equal',
+		'greater_than',
+		'greater_than_or_equal'
+	];
+
+	const FIELD_OPERATOR_OVERRIDES: Partial<Record<MatchFieldOptionValue, MatchOperatorOptionValue[]>> = {
+		'ip.src': ['equals', 'not_equals', 'in_set', 'not_in_set', 'in_list', 'not_in_list'],
+		'ip.src.country': ['equals', 'not_equals', 'in_set', 'not_in_set', 'in_list', 'not_in_list'],
+		'ip.src.continent': ['equals', 'not_equals', 'in_set', 'not_in_set', 'in_list', 'not_in_list'],
+		'ip.src.asnum': ['equals', 'not_equals', 'in_set', 'not_in_set', 'in_list', 'not_in_list'],
+		'http.request.method': ['equals', 'not_equals', 'in_set', 'not_in_set'],
+		'http.request.version': ['equals', 'not_equals', 'in_set', 'not_in_set'],
+		'cf.waf.score': DEFAULT_NUMERIC_OPERATORS
+	};
+
 	// ─── State ──────────────────────────────────────────────
 	const zones = $state<ZoneSummary[]>([]);
 	let zonesLoading = $state(false);
@@ -195,6 +233,7 @@
 	let createBlockBody = $state('');
 	let createRuleValidated = $state(false);
 	let existingExpressionValidationErrors = $state<Record<number, string>>({});
+	let existingRuleValidated = $state<Record<number, boolean>>({});
 
 	// Cross-zone copy
 	let copyTargetZoneIds = $state<Set<string>>(new Set());
@@ -334,6 +373,24 @@
 		response.content = body;
 	}
 
+	function clearExistingRuleValidated(index: number): void {
+		if (!existingRuleValidated[index]) return;
+		const next = { ...existingRuleValidated };
+		delete next[index];
+		existingRuleValidated = next;
+	}
+
+	function markExistingRuleValidated(index: number): void {
+		existingRuleValidated = {
+			...existingRuleValidated,
+			[index]: true
+		};
+	}
+
+	function isExistingRuleValidated(index: number): boolean {
+		return existingRuleValidated[index] === true;
+	}
+
 	function sanitizeRuleForSubmission(rule: WafRule): WafRule {
 		if (rule.action !== 'block') return rule;
 
@@ -407,6 +464,40 @@
 		existingExpressionValidationErrors = next;
 	}
 
+	async function validateExistingRule(index: number): Promise<void> {
+		const rule = existingRules[index];
+		if (!rule) return;
+
+		try {
+			if (!rule.expression?.trim()) throw new Error('Expression is required.');
+
+			const expressionError = await validateExpressionWithApi(rule.expression);
+			if (expressionError) {
+				existingExpressionValidationErrors = {
+					...existingExpressionValidationErrors,
+					[index]: expressionError
+				};
+				throw new Error('Expression is invalid.');
+			}
+
+			clearExistingExpressionValidationError(index);
+
+			if (
+				rule.action === 'block' &&
+				getRuleBlockResponseType(rule) !== DEFAULT_BLOCK_RESPONSE_TYPE &&
+				!getRuleBlockBody(rule).trim()
+			) {
+				throw new Error('Response body is required when using a custom block response.');
+			}
+
+			markExistingRuleValidated(index);
+			showToast('ok', 'Rule is valid — ready to save.');
+		} catch (error) {
+			clearExistingRuleValidated(index);
+			showToast('error', error instanceof Error ? error.message : 'Validation failed');
+		}
+	}
+
 	function toggleExpandRule(index: number): void {
 		expandedRuleIndex = expandedRuleIndex === index ? null : index;
 	}
@@ -459,6 +550,23 @@
 
 	function isSetOperator(op: MatchOperatorOptionValue): boolean {
 		return op === 'in_set' || op === 'not_in_set';
+	}
+
+	function getAllowedOperatorValuesForField(field: MatchFieldOptionValue): MatchOperatorOptionValue[] {
+		if (isBooleanToggleField(field)) return [];
+		const overridden = FIELD_OPERATOR_OVERRIDES[field];
+		if (overridden && overridden.length > 0) return overridden;
+		if (isNumericField(field)) return DEFAULT_NUMERIC_OPERATORS;
+		return DEFAULT_TEXT_OPERATORS;
+	}
+
+	function getMatchOperatorsForField(field: MatchFieldOptionValue): MatchOperatorOption[] {
+		const allowed = new Set(getAllowedOperatorValuesForField(field));
+		return MATCH_OPERATORS.filter((operator) => allowed.has(operator.value));
+	}
+
+	function isOperatorAllowedForField(field: MatchFieldOptionValue, operator: MatchOperatorOptionValue): boolean {
+		return getAllowedOperatorValuesForField(field).includes(operator);
 	}
 
 	function simpleValuePlaceholder(op: MatchOperatorOptionValue): string {
@@ -554,6 +662,7 @@
 		if (!existingRules[index]) return;
 		existingRules[index].expression = expression;
 		clearExistingExpressionValidationError(index);
+		clearExistingRuleValidated(index);
 	}
 
 	function rebuildRuleExpressionFromSimple(index: number): void {
@@ -777,7 +886,14 @@
 	}
 
 	function initializeSimpleModeForRule(index: number): void {
-		const parsed = parseExpressionToSimpleConditions(getExpressionForEditor(index) || '');
+		const expression = (getExpressionForEditor(index) || '').trim();
+		if (!expression) {
+			simpleParseErrorsByRule[index] = '';
+			simpleConditionsByRule[index] = [defaultSimpleCondition()];
+			return;
+		}
+
+		const parsed = parseExpressionToSimpleConditions(expression);
 		if (!parsed) {
 			simpleParseErrorsByRule[index] =
 				'This expression cannot be represented in Simple View. Switch to Expression View to edit it directly.';
@@ -819,9 +935,12 @@
 				c.operator = 'equals';
 				c.value = '';
 				c.booleanToggleOn = true;
+				continue;
 			}
-			if (isNumericField(field)) {
-				c.operator = 'less_than';
+
+			const allowed = getAllowedOperatorValuesForField(field);
+			if (!allowed.includes(c.operator)) {
+				c.operator = allowed[0] ?? 'equals';
 			}
 		}
 		rebuildRuleExpressionFromSimple(index);
@@ -831,6 +950,7 @@
 		const current = simpleConditionsByRule[index] ?? [];
 		for (const c of current) {
 			if (c.id !== conditionId) continue;
+			if (!isOperatorAllowedForField(c.field, operator)) continue;
 			c.operator = operator;
 		}
 		rebuildRuleExpressionFromSimple(index);
@@ -904,6 +1024,7 @@
 			existingRulesetName = data.name || 'Custom rules';
 			existingRules = data.rules || [];
 			existingExpressionValidationErrors = {};
+			existingRuleValidated = {};
 			expandedRuleIndex = null;
 			showToast('ok', `Loaded ${existingRules.length} existing rule(s).`);
 		} catch (error) {
@@ -932,6 +1053,7 @@
 			if (!response.ok) throw new Error(data.error || 'Save failed');
 			existingRules = data.rules || [];
 			existingExpressionValidationErrors = {};
+			existingRuleValidated = {};
 			showToast('ok', 'Rules saved successfully.');
 		} catch (error) {
 			showToast('error', error instanceof Error ? error.message : 'Save failed');
@@ -1372,7 +1494,7 @@
 											<div class="panel stack" style="margin: 0.35rem 0; border-left: 2px solid var(--accent);">
 												<label class="stack">
 													<span class="label">Rule Name / Description</span>
-													<input class="input" bind:value={rule.description} />
+													<input class="input" bind:value={rule.description} oninput={() => clearExistingRuleValidated(index)} />
 												</label>
 
 												<!-- Expression editor -->
@@ -1395,7 +1517,7 @@
 																bind:this={expressionInputs[index]}
 																bind:value={rule.expression}
 																onscroll={() => syncExpressionScroll(index)}
-																oninput={() => { syncExpressionScroll(index); clearExistingExpressionValidationError(index); }}
+																oninput={() => { syncExpressionScroll(index); clearExistingExpressionValidationError(index); clearExistingRuleValidated(index); }}
 																spellcheck="false"
 															></textarea>
 														</div>
@@ -1436,7 +1558,7 @@
 																					<input class="input mono" value="equals" disabled />
 																				{:else}
 																					<select class="select mono" bind:value={condition.operator} onchange={() => onSimpleOperatorChange(index, condition.id, condition.operator)}>
-																						{#each MATCH_OPERATORS.filter((o) => isNumericField(condition.field) ? o.numericOnly : !o.numericOnly) as operator}
+																						{#each getMatchOperatorsForField(condition.field) as operator}
 																							<option value={operator.value}>{operator.label}</option>
 																						{/each}
 																					</select>
@@ -1496,7 +1618,7 @@
 												<div class="grid-2">
 													<label class="stack">
 														<span class="label">Action</span>
-														<select class="select" bind:value={rule.action}>
+														<select class="select" bind:value={rule.action} onchange={() => clearExistingRuleValidated(index)}>
 															{#each WAF_ACTIONS as action}
 																<option value={action.value}>{action.label}</option>
 															{/each}
@@ -1513,7 +1635,7 @@
 																<span class="label">Response type</span>
 																<select class="select"
 																	value={getRuleBlockResponseType(rule)}
-																	onchange={(e) => onRuleBlockResponseTypeChange(rule, (e.currentTarget as HTMLSelectElement).value)}
+																	onchange={(e) => { onRuleBlockResponseTypeChange(rule, (e.currentTarget as HTMLSelectElement).value); clearExistingRuleValidated(index); }}
 																>
 																	{#each BLOCK_RESPONSE_TYPES as rt}
 																		<option value={rt.value}>{rt.label}</option>
@@ -1525,7 +1647,7 @@
 																<input class="input mono" type="number" min="400" max="499"
 																	value={getRuleBlockStatusCode(rule)}
 																	disabled={getRuleBlockResponseType(rule) === DEFAULT_BLOCK_RESPONSE_TYPE}
-																	oninput={(e) => onRuleBlockStatusCodeInput(rule, (e.currentTarget as HTMLInputElement).value)}
+																	oninput={(e) => { onRuleBlockStatusCodeInput(rule, (e.currentTarget as HTMLInputElement).value); clearExistingRuleValidated(index); }}
 																/>
 															</label>
 														</div>
@@ -1535,12 +1657,25 @@
 															<textarea class="textarea mono"
 																value={getRuleBlockBody(rule)}
 																placeholder="Your request was blocked."
-																oninput={(e) => onRuleBlockBodyInput(rule, (e.currentTarget as HTMLTextAreaElement).value)}
+																oninput={(e) => { onRuleBlockBodyInput(rule, (e.currentTarget as HTMLTextAreaElement).value); clearExistingRuleValidated(index); }}
 															></textarea>
 														</label>
 														{/if}
 													</div>
 												{/if}
+
+												{#if isExistingRuleValidated(index)}
+													<div class="status ok">Rule is valid — ready to save.</div>
+												{/if}
+
+												<div class="row" style="justify-content: flex-end;">
+													<button class="button secondary" type="button" onclick={() => validateExistingRule(index)} disabled={busy}>
+														Validate Rule
+													</button>
+													<button class="button save" type="button" onclick={saveExistingRules} disabled={busy || !selectedZoneId || !isExistingRuleValidated(index)}>
+														Save Rule
+													</button>
+												</div>
 											</div>
 										</td>
 									</tr>
@@ -1622,7 +1757,7 @@
 												<input class="input mono" value="equals" disabled />
 											{:else}
 												<select class="select mono" bind:value={condition.operator} onchange={() => onSimpleOperatorChange(CREATE_EDITOR_INDEX, condition.id, condition.operator)}>
-													{#each MATCH_OPERATORS.filter((o) => isNumericField(condition.field) ? o.numericOnly : !o.numericOnly) as operator}
+													{#each getMatchOperatorsForField(condition.field) as operator}
 														<option value={operator.value}>{operator.label}</option>
 													{/each}
 												</select>
