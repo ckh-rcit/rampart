@@ -217,6 +217,21 @@
 		}
 	});
 
+	$effect(() => {
+		if (zonesLoading) return;
+
+		const query = zoneQuery.trim().toLowerCase();
+		if (!query) return;
+		if (filteredZones.length === 0) return;
+
+		const exactMatch = filteredZones.find((zone) => zone.name.toLowerCase() === query);
+		const nextZone = exactMatch ?? (filteredZones.length === 1 ? filteredZones[0] : null);
+
+		if (nextZone && selectedZoneId !== nextZone.id) {
+			selectedZoneId = nextZone.id;
+		}
+	});
+
 	// ─── Helpers ────────────────────────────────────────────
 
 	function showToast(type: 'ok' | 'error', message: string): void {
