@@ -193,7 +193,7 @@
 	let createBlockResponseType = $state<BlockResponseTypeValue>(DEFAULT_BLOCK_RESPONSE_TYPE);
 	let createBlockStatusCode = $state(403);
 	let createBlockBody = $state('');
-	let previewRules = $state<WafRule[]>([]);
+	let createRuleValidated = $state(false);
 	let existingExpressionValidationErrors = $state<Record<number, string>>({});
 
 	// Cross-zone copy
@@ -548,6 +548,7 @@
 		if (index === CREATE_EDITOR_INDEX) {
 			createExpressionText = expression;
 			createExpressionValidationError = '';
+			createRuleValidated = false;
 			return;
 		}
 		if (!existingRules[index]) return;
@@ -973,14 +974,27 @@
 		return rule;
 	}
 
-	async function addToPreview(): Promise<void> {
+	function resetCreateForm(): void {
+		createDescription = '';
+		createAction = 'block';
+		createExpressionText = '';
+		createExpressionValidationError = '';
+		createRuleValidated = false;
+		createBlockResponseType = DEFAULT_BLOCK_RESPONSE_TYPE;
+		createBlockStatusCode = 403;
+		createBlockBody = '';
+		delete matchEditorViews[CREATE_EDITOR_INDEX];
+		delete simpleConditionsByRule[CREATE_EDITOR_INDEX];
+		delete simpleParseErrorsByRule[CREATE_EDITOR_INDEX];
+	}
+
+	async function validateCreateRule(): Promise<void> {
+		createRuleValidated = false;
 		try {
 			if (!createExpressionText.trim()) throw new Error('Expression is required.');
 			const expressionError = await validateExpressionWithApi(createExpressionText);
 			createExpressionValidationError = expressionError ?? '';
-			if (expressionError) {
-				throw new Error('Expression validation failed.');
-			}
+			if (expressionError) throw new Error('Expression is invalid.');
 
 			if (
 				createAction === 'block' &&
@@ -989,46 +1003,28 @@
 			) {
 				throw new Error('Response body is required when using a custom block response.');
 			}
-			previewRules = [...previewRules, buildCreateRule()];
-			createExpressionValidationError = '';
-			showToast('ok', 'Rule added to preview.');
+			createRuleValidated = true;
+			showToast('ok', 'Rule is valid — ready to deploy.');
 		} catch (error) {
-			showToast('error', error instanceof Error ? error.message : 'Failed to build rule');
+			showToast('error', error instanceof Error ? error.message : 'Validation failed');
 		}
-	}
-
-	function removePreviewRule(index: number): void {
-		previewRules = previewRules.filter((_, i) => i !== index);
-	}
-
-	async function validatePreviewRuleExpressions(rules: WafRule[]): Promise<boolean> {
-		for (const rule of rules) {
-			const validationError = await validateExpressionWithApi(rule.expression ?? '');
-			if (validationError) {
-				showToast('error', `Preview rule expression invalid: ${validationError}`);
-				return false;
-			}
-		}
-		return true;
 	}
 
 	async function deployReplace(): Promise<void> {
-		if (!selectedZoneId || previewRules.length === 0) return;
+		if (!selectedZoneId || !createRuleValidated) return;
 		busy = true;
 		try {
-			const valid = await validatePreviewRuleExpressions(previewRules);
-			if (!valid) return;
-
-			const sanitizedRules = sanitizeRulesForSubmission(previewRules);
+			const rule = sanitizeRuleForSubmission(buildCreateRule());
 			const response = await fetch(`/api/zones/${selectedZoneId}/rules`, {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ name: existingRulesetName, rules: sanitizedRules })
+				body: JSON.stringify({ name: existingRulesetName, rules: [rule] })
 			});
 			const data = (await response.json()) as RulesResponse;
 			if (!response.ok) throw new Error(data.error || 'Deploy failed');
-			showToast('ok', `Deployed ${previewRules.length} rule(s) — replaced entire ruleset.`);
 			existingRules = data.rules ?? [];
+			showToast('ok', 'Rule deployed — replaced entire ruleset.');
+			resetCreateForm();
 		} catch (error) {
 			showToast('error', error instanceof Error ? error.message : 'Deploy failed');
 		} finally {
@@ -1037,17 +1033,15 @@
 	}
 
 	async function deployAppend(): Promise<void> {
-		if (!selectedZoneId || previewRules.length === 0) return;
+		if (!selectedZoneId || !createRuleValidated) return;
 		busy = true;
 		try {
-			const valid = await validatePreviewRuleExpressions(previewRules);
-			if (!valid) return;
-
 			const loadRes = await fetch(`/api/zones/${selectedZoneId}/rules`);
 			const loadData = (await loadRes.json()) as RulesResponse;
 			if (!loadRes.ok) throw new Error(loadData.error || 'Failed to load existing rules');
 
-			const merged = [...(loadData.rules ?? []), ...previewRules];
+			const rule = sanitizeRuleForSubmission(buildCreateRule());
+			const merged = [...(loadData.rules ?? []), rule];
 			const response = await fetch(`/api/zones/${selectedZoneId}/rules`, {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
@@ -1058,8 +1052,9 @@
 			});
 			const data = (await response.json()) as RulesResponse;
 			if (!response.ok) throw new Error(data.error || 'Deploy failed');
-			showToast('ok', `Appended ${previewRules.length} rule(s) to existing ${(loadData.rules ?? []).length} rule(s).`);
 			existingRules = data.rules ?? [];
+			showToast('ok', `Rule appended — zone now has ${(data.rules ?? []).length} rule(s).`);
+			resetCreateForm();
 		} catch (error) {
 			showToast('error', error instanceof Error ? error.message : 'Deploy failed');
 		} finally {
@@ -1191,8 +1186,8 @@
 				const parsed = JSON.parse(importText) as RampartExportPayload | WafRule[];
 				const rules = Array.isArray(parsed) ? parsed : parsed.rules;
 				if (!Array.isArray(rules) || rules.length === 0) throw new Error('No rules found in JSON.');
-				previewRules = [...previewRules, ...rules];
-				showToast('ok', `Imported ${rules.length} rule(s) into preview.`);
+				existingRules = [...existingRules, ...rules];
+				showToast('ok', `Imported ${rules.length} rule(s) — review and save in Manage tab.`);
 			} else {
 				const lines = importText.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
 				if (lines.length === 0) throw new Error('No lines found.');
@@ -1221,12 +1216,12 @@
 						enabled: true
 					};
 				});
-				previewRules = [...previewRules, ...rules];
-				showToast('ok', `Imported ${rules.length} rule(s) into preview.`);
+				existingRules = [...existingRules, ...rules];
+				showToast('ok', `Imported ${rules.length} rule(s) — review and save in Manage tab.`);
 			}
 			showImportDialog = false;
 			importText = '';
-			activeTab = 'create';
+			activeTab = 'manage';
 		} catch (error) {
 			showToast('error', error instanceof Error ? error.message : 'Import failed');
 		}
@@ -1581,7 +1576,7 @@
 							bind:this={expressionInputs[CREATE_EDITOR_INDEX]}
 							bind:value={createExpressionText}
 							onscroll={() => syncExpressionScroll(CREATE_EDITOR_INDEX)}
-							oninput={() => { syncExpressionScroll(CREATE_EDITOR_INDEX); createExpressionValidationError = ''; }}
+							oninput={() => { syncExpressionScroll(CREATE_EDITOR_INDEX); createExpressionValidationError = ''; createRuleValidated = false; }}
 							spellcheck="false"
 							placeholder='(ip.src.country eq "GB") and (cf.waf.score lt 20)'
 						></textarea>
@@ -1715,37 +1710,11 @@
 			{/if}
 
 			<div class="row">
-				<button class="button secondary" type="button" onclick={addToPreview}>Add to Preview</button>
+				<button class="button secondary" type="button" onclick={validateCreateRule} disabled={busy}>Validate Rule</button>
 			</div>
 
-			{#if previewRules.length > 0}
-				<div style="overflow-x: auto;">
-					<table>
-						<thead>
-							<tr>
-								<th>#</th>
-								<th>Name</th>
-								<th>Expression</th>
-								<th>Action</th>
-								<th></th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each previewRules as rule, index}
-								<tr>
-									<td>{index + 1}</td>
-									<td>{rule.description || '(unnamed)'}</td>
-									<td class="mono" style="font-size: 0.68rem;">{truncate(rule.expression, 60)}</td>
-									<td><span class="action-badge {rule.action}">{actionLabel(rule.action)}</span></td>
-									<td>
-										<button class="button danger" style="font-size: 0.68rem; padding: 0.18rem 0.45rem;" type="button" onclick={() => removePreviewRule(index)}>Remove</button>
-									</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				</div>
-
+			{#if createRuleValidated}
+				<div class="status ok">Rule is valid — choose how to deploy it.</div>
 				<div class="row">
 					<button class="button" type="button" onclick={deployAppend} disabled={busy || !selectedZoneId}>
 						Deploy (Append to Existing)
