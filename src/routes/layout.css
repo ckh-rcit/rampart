@@ -214,6 +214,14 @@ main {
 	font-size: 0.74rem;
 }
 
+.label {
+	color: oklch(0.88 0.06 50);
+	font-size: 0.74rem;
+	font-weight: 700;
+	letter-spacing: 0.03em;
+	text-transform: uppercase;
+}
+
 .muted a {
 	color: var(--accent);
 	text-decoration: none;

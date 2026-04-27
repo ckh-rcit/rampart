@@ -780,7 +780,7 @@
 		const parsed = parseExpressionToSimpleConditions(getExpressionForEditor(index) || '');
 		if (!parsed) {
 			simpleParseErrorsByRule[index] =
-				'Simple View supports and/or combinations of basic clauses (including inline sets like ip.src in {203.0.113.0/24} and Cloudflare lists like ip.src in $my_list). This expression uses syntax Simple View cannot safely represent.';
+				'This expression cannot be represented in Simple View. Switch to Expression View to edit it directly.';
 			simpleConditionsByRule[index] = [defaultSimpleCondition()];
 			return;
 		}
@@ -1368,14 +1368,14 @@
 										<td colspan="6" style="padding: 0;">
 											<div class="panel stack" style="margin: 0.35rem 0;">
 												<label class="stack">
-													<span class="muted">Rule Name / Description</span>
+													<span class="label">Rule Name / Description</span>
 													<input class="input" bind:value={rule.description} />
 												</label>
 
 												<!-- Expression editor -->
 												<div class="stack">
 													<div class="row">
-														<span class="muted">Match expression</span>
+														<span class="label">Match expression</span>
 														<button type="button" class="button {getMatchEditorView(index) === 'expression' ? '' : 'secondary'}" onclick={() => setMatchEditorView(index, 'expression')}>
 															Expression View
 														</button>
@@ -1412,7 +1412,7 @@
 																	<div class="panel stack">
 																		{#if conditionIndex > 0}
 																			<div class="row">
-																				<span class="muted">Join</span>
+																				<span class="label">Join</span>
 																				<button type="button" class="button {condition.joinWithPrevious === 'and' ? '' : 'secondary'}" onclick={() => onSimpleJoinChange(index, condition.id, 'and')}>AND</button>
 																				<button type="button" class="button {condition.joinWithPrevious === 'or' ? '' : 'secondary'}" onclick={() => onSimpleJoinChange(index, condition.id, 'or')}>OR</button>
 																			</div>
@@ -1420,7 +1420,7 @@
 
 																		<div class="grid-2">
 																			<label class="stack">
-																				<span class="muted">Field</span>
+																				<span class="label">Field</span>
 																				<select class="select mono" bind:value={condition.field} onchange={() => onSimpleFieldChange(index, condition.id, condition.field)}>
 																					{#each MATCH_FIELDS as field}
 																						<option value={field.value}>{field.label}</option>
@@ -1428,7 +1428,7 @@
 																				</select>
 																			</label>
 																			<label class="stack">
-																				<span class="muted">Operator</span>
+																				<span class="label">Operator</span>
 																				{#if isBooleanToggleField(condition.field)}
 																					<input class="input mono" value="equals" disabled />
 																				{:else}
@@ -1443,13 +1443,13 @@
 
 																		{#if isBooleanToggleField(condition.field)}
 																			<div class="row">
-																				<span class="muted">Value</span>
+																				<span class="label">Value</span>
 																				<button type="button" class="button {condition.booleanToggleOn ? '' : 'secondary'}" onclick={() => { condition.booleanToggleOn = true; onSimpleBooleanToggleChange(index); }}>On</button>
 																				<button type="button" class="button {condition.booleanToggleOn ? 'secondary' : ''}" onclick={() => { condition.booleanToggleOn = false; onSimpleBooleanToggleChange(index); }}>Off</button>
 																			</div>
 																		{:else if isListOperator(condition.operator)}
 																			<label class="stack">
-																				<span class="muted">List</span>
+																				<span class="label">List</span>
 																				{#if cfListsLoading}
 																					<input class="input mono" value="Loading lists…" disabled />
 																				{:else if cfLists.length === 0}
@@ -1465,7 +1465,7 @@
 																			</label>
 																		{:else}
 																			<label class="stack">
-																				<span class="muted">Value</span>
+																				<span class="label">Value</span>
 																				<input class="input mono" bind:value={condition.value} oninput={() => onSimpleValueChange(index)} placeholder={simpleValuePlaceholder(condition.operator)} />
 																			</label>
 																		{/if}
@@ -1492,7 +1492,7 @@
 												<!-- Action selector -->
 												<div class="grid-2">
 													<label class="stack">
-														<span class="muted">Action</span>
+														<span class="label">Action</span>
 														<select class="select" bind:value={rule.action}>
 															{#each WAF_ACTIONS as action}
 																<option value={action.value}>{action.label}</option>
@@ -1504,10 +1504,10 @@
 												<!-- Block custom response (conditional) -->
 												{#if rule.action === 'block'}
 													<div class="panel stack">
-														<span class="muted">Block Response (optional)</span>
+														<span class="label">Block Response (optional)</span>
 														<div class="grid-2">
 															<label class="stack">
-																<span class="muted">Response type</span>
+																<span class="label">Response type</span>
 																<select class="select"
 																	value={getRuleBlockResponseType(rule)}
 																	onchange={(e) => onRuleBlockResponseTypeChange(rule, (e.currentTarget as HTMLSelectElement).value)}
@@ -1518,7 +1518,7 @@
 																</select>
 															</label>
 															<label class="stack">
-																<span class="muted">Status code (400–499)</span>
+																<span class="label">Status code (400–499)</span>
 																<input class="input mono" type="number" min="400" max="499"
 																	value={getRuleBlockStatusCode(rule)}
 																	disabled={getRuleBlockResponseType(rule) === DEFAULT_BLOCK_RESPONSE_TYPE}
@@ -1528,7 +1528,7 @@
 														</div>
 														{#if getRuleBlockResponseType(rule) !== DEFAULT_BLOCK_RESPONSE_TYPE}
 														<label class="stack">
-															<span class="muted">Response body</span>
+															<span class="label">Response body</span>
 															<textarea class="textarea mono"
 																value={getRuleBlockBody(rule)}
 																placeholder="Your request was blocked."
@@ -1553,14 +1553,14 @@
 	{:else if activeTab === 'create'}
 		<div class="stack">
 			<label class="stack">
-				<span class="muted">Rule name / description</span>
+				<span class="label">Rule name / description</span>
 				<input class="input" bind:value={createDescription} placeholder="My WAF rule" />
 			</label>
 
 			<!-- Expression editor for create -->
 			<div class="stack">
 				<div class="row">
-					<span class="muted">Match expression</span>
+					<span class="label">Match expression</span>
 					<button type="button" class="button {getMatchEditorView(CREATE_EDITOR_INDEX) === 'expression' ? '' : 'secondary'}" onclick={() => setMatchEditorView(CREATE_EDITOR_INDEX, 'expression')}>
 						Expression View
 					</button>
@@ -1598,7 +1598,7 @@
 								<div class="panel stack">
 									{#if conditionIndex > 0}
 										<div class="row">
-											<span class="muted">Join</span>
+											<span class="label">Join</span>
 											<button type="button" class="button {condition.joinWithPrevious === 'and' ? '' : 'secondary'}" onclick={() => onSimpleJoinChange(CREATE_EDITOR_INDEX, condition.id, 'and')}>AND</button>
 											<button type="button" class="button {condition.joinWithPrevious === 'or' ? '' : 'secondary'}" onclick={() => onSimpleJoinChange(CREATE_EDITOR_INDEX, condition.id, 'or')}>OR</button>
 										</div>
@@ -1606,7 +1606,7 @@
 
 									<div class="grid-2">
 										<label class="stack">
-											<span class="muted">Field</span>
+											<span class="label">Field</span>
 											<select class="select mono" bind:value={condition.field} onchange={() => onSimpleFieldChange(CREATE_EDITOR_INDEX, condition.id, condition.field)}>
 												{#each MATCH_FIELDS as field}
 													<option value={field.value}>{field.label}</option>
@@ -1614,7 +1614,7 @@
 											</select>
 										</label>
 										<label class="stack">
-											<span class="muted">Operator</span>
+											<span class="label">Operator</span>
 											{#if isBooleanToggleField(condition.field)}
 												<input class="input mono" value="equals" disabled />
 											{:else}
@@ -1629,13 +1629,13 @@
 
 									{#if isBooleanToggleField(condition.field)}
 										<div class="row">
-											<span class="muted">Value</span>
+											<span class="label">Value</span>
 											<button type="button" class="button {condition.booleanToggleOn ? '' : 'secondary'}" onclick={() => { condition.booleanToggleOn = true; onSimpleBooleanToggleChange(CREATE_EDITOR_INDEX); }}>On</button>
 											<button type="button" class="button {condition.booleanToggleOn ? 'secondary' : ''}" onclick={() => { condition.booleanToggleOn = false; onSimpleBooleanToggleChange(CREATE_EDITOR_INDEX); }}>Off</button>
 										</div>
 									{:else if isListOperator(condition.operator)}
 										<label class="stack">
-											<span class="muted">List</span>
+											<span class="label">List</span>
 											{#if cfListsLoading}
 												<input class="input mono" value="Loading lists…" disabled />
 											{:else if cfLists.length === 0}
@@ -1651,7 +1651,7 @@
 										</label>
 									{:else}
 										<label class="stack">
-											<span class="muted">Value</span>
+											<span class="label">Value</span>
 											<input class="input mono" bind:value={condition.value} oninput={() => onSimpleValueChange(CREATE_EDITOR_INDEX)} placeholder={simpleValuePlaceholder(condition.operator)} />
 										</label>
 									{/if}
@@ -1677,7 +1677,7 @@
 
 			<div class="grid-2">
 				<label class="stack">
-					<span class="muted">Action</span>
+					<span class="label">Action</span>
 					<select class="select" bind:value={createAction}>
 						{#each WAF_ACTIONS as action}
 							<option value={action.value}>{action.label}</option>
@@ -1688,10 +1688,10 @@
 
 			{#if createAction === 'block'}
 				<div class="panel stack">
-					<span class="muted">Block Response (optional)</span>
+					<span class="label">Block Response (optional)</span>
 					<div class="grid-2">
 						<label class="stack">
-							<span class="muted">Response type</span>
+							<span class="label">Response type</span>
 							<select class="select" bind:value={createBlockResponseType}>
 								{#each BLOCK_RESPONSE_TYPES as rt}
 									<option value={rt.value}>{rt.label}</option>
@@ -1699,13 +1699,13 @@
 							</select>
 						</label>
 						<label class="stack">
-							<span class="muted">Status code (400–499)</span>
+							<span class="label">Status code (400–499)</span>
 							<input class="input mono" type="number" min="400" max="499" bind:value={createBlockStatusCode} disabled={createBlockResponseType === DEFAULT_BLOCK_RESPONSE_TYPE} />
 						</label>
 					</div>
 				{#if createBlockResponseType !== DEFAULT_BLOCK_RESPONSE_TYPE}
 				<label class="stack">
-					<span class="muted">Response body</span>
+					<span class="label">Response body</span>
 					<textarea class="textarea mono" bind:value={createBlockBody} placeholder="Your request was blocked."></textarea>
 				</label>
 				{/if}
@@ -1739,7 +1739,7 @@
 				<div class="row">
 					<button class="button secondary" type="button" onclick={selectAllForCopy}>Select All</button>
 					<button class="button secondary" type="button" onclick={deselectAllForCopy}>Deselect All</button>
-					<span class="muted">{copySelection.size} of {existingRules.length} selected</span>
+					<span class="label">{copySelection.size} of {existingRules.length} selected</span>
 				</div>
 
 				<div style="overflow-x: auto;">
@@ -1773,7 +1773,7 @@
 				</div>
 				<div class="stack" style="gap: 0.3rem;">
 					<div class="row">
-						<span class="muted">Target zones ({copyTargetZoneIds.size} selected)</span>
+						<span class="label">Target zones ({copyTargetZoneIds.size} selected)</span>
 						<button class="button secondary" style="font-size: 0.68rem; padding: 0.18rem 0.45rem;" type="button" onclick={selectAllCopyTargets}>All</button>
 						<button class="button secondary" style="font-size: 0.68rem; padding: 0.18rem 0.45rem;" type="button" onclick={deselectAllCopyTargets}>None</button>
 					</div>
@@ -1785,7 +1785,7 @@
 							</label>
 						{/each}
 						{#if filteredCopyTargetZones.filter((z) => z.id !== selectedZoneId).length === 0}
-							<span class="muted">No matching zones</span>
+							<span class="label">No matching zones</span>
 						{/if}
 					</div>
 				</div>
@@ -1832,7 +1832,7 @@
 			{#if importMode === 'text'}
 				<div class="grid-2">
 					<label class="stack">
-						<span class="muted">Default action for imported rules</span>
+						<span class="label">Default action for imported rules</span>
 						<select class="select" bind:value={importDefaultAction}>
 							{#each WAF_ACTIONS as action}
 								<option value={action.value}>{action.label}</option>
@@ -1846,12 +1846,12 @@
 			{/if}
 
 			<label class="stack">
-				<span class="muted">Upload file</span>
+				<span class="label">Upload file</span>
 				<input type="file" accept=".json,.txt,.text" onchange={onImportFileUpload} />
 			</label>
 
 			<label class="stack">
-				<span class="muted">Or paste content</span>
+				<span class="label">Or paste content</span>
 				<textarea class="textarea mono" bind:value={importText} placeholder="Paste here…"></textarea>
 			</label>
 
