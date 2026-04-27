@@ -291,9 +291,11 @@
 	let existingRuleValidated = $state<Record<number, boolean>>({});
 
 	// Cross-zone copy
+	type CopyStatus = 'pending' | 'running' | 'ok' | 'error';
 	let copyTargetZoneIds = $state<Set<string>>(new Set());
 	let copySelection = $state<Set<number>>(new Set());
 	let copyTargetQuery = $state('');
+	let copyProgress = $state<Record<string, CopyStatus>>({});
 
 	// Import
 	let showImportDialog = $state(false);
@@ -1263,14 +1265,17 @@
 		if (next.has(index)) next.delete(index);
 		else next.add(index);
 		copySelection = next;
+		copyProgress = {};
 	}
 
 	function selectAllForCopy(): void {
 		copySelection = new Set(existingRules.map((_, i) => i));
+		copyProgress = {};
 	}
 
 	function deselectAllForCopy(): void {
 		copySelection = new Set();
+		copyProgress = {};
 	}
 
 	function toggleCopyTargetZone(zoneId: string): void {
@@ -1278,16 +1283,19 @@
 		if (next.has(zoneId)) next.delete(zoneId);
 		else next.add(zoneId);
 		copyTargetZoneIds = next;
+		copyProgress = {};
 	}
 
 	function selectAllCopyTargets(): void {
 		copyTargetZoneIds = new Set(
 			filteredCopyTargetZones.filter((z) => z.id !== selectedZoneId).map((z) => z.id)
 		);
+		copyProgress = {};
 	}
 
 	function deselectAllCopyTargets(): void {
 		copyTargetZoneIds = new Set();
+		copyProgress = {};
 	}
 
 	async function executeCopy(): Promise<void> {
@@ -1297,14 +1305,17 @@
 		const rulesToCopy = existingRules
 			.filter((_, i) => copySelection.has(i))
 			.map((rule) => {
-				const { id, ref, ...rest } = rule;
-				return rest;
+				const { id: _id, ref: _ref, ...rest } = rule;
+				return sanitizeRuleForSubmission(rest as WafRule);
 			});
 
-		const succeeded: string[] = [];
-		const failed: string[] = [];
+		// Initialise progress for all targets
+		const initialProgress: Record<string, CopyStatus> = {};
+		for (const id of copyTargetZoneIds) initialProgress[id] = 'pending';
+		copyProgress = initialProgress;
 
 		for (const targetId of copyTargetZoneIds) {
+			copyProgress = { ...copyProgress, [targetId]: 'running' };
 			try {
 				const loadRes = await fetch(`/api/zones/${targetId}/rules`);
 				const loadData = (await loadRes.json()) as RulesResponse;
@@ -1319,19 +1330,19 @@
 				const data = (await response.json()) as RulesResponse;
 				if (!response.ok) throw new Error(data.error || 'Copy failed');
 
-				const targetName = zones.find((z) => z.id === targetId)?.name ?? targetId;
-				succeeded.push(targetName);
+				copyProgress = { ...copyProgress, [targetId]: 'ok' };
 			} catch {
-				const targetName = zones.find((z) => z.id === targetId)?.name ?? targetId;
-				failed.push(targetName);
+				copyProgress = { ...copyProgress, [targetId]: 'error' };
 			}
 		}
 
-		if (succeeded.length > 0) {
-			showToast('ok', `Copied ${rulesToCopy.length} rule(s) to ${succeeded.length} zone(s): ${succeeded.join(', ')}`);
-		}
-		if (failed.length > 0) {
-			showToast('error', `Failed to copy to: ${failed.join(', ')}`);
+		const successCount = Object.values(copyProgress).filter((s) => s === 'ok').length;
+		const failCount = Object.values(copyProgress).filter((s) => s === 'error').length;
+
+		if (successCount > 0 && failCount === 0) {
+			showToast('ok', `Copied ${rulesToCopy.length} rule(s) to ${successCount} zone(s).`);
+		} else if (failCount > 0) {
+			showToast('error', `${successCount} zone(s) succeeded, ${failCount} failed — see details below.`);
 		}
 
 		busy = false;
@@ -1965,7 +1976,7 @@
 			<p class="muted">Copy selected rules from the current zone to another zone. Rules are appended to the target zone's existing rules.</p>
 
 			{#if existingRules.length === 0}
-				<p class="muted">Load rules in the Manage tab first.</p>
+				<p class="muted">No rules loaded. Switch to the <button class="button secondary" style="display:inline;padding:0.1rem 0.4rem;font-size:0.8rem;" type="button" onclick={() => (activeTab = 'manage')}>Manage</button> tab to load rules first.</p>
 			{:else}
 				<div class="row">
 					<button class="button secondary" type="button" onclick={selectAllForCopy}>Select All</button>
@@ -2013,6 +2024,15 @@
 							<label class="copy-target-item">
 								<input type="checkbox" checked={copyTargetZoneIds.has(zone.id)} onchange={() => toggleCopyTargetZone(zone.id)} />
 								<span>{zone.name}</span>
+								{#if copyProgress[zone.id] === 'pending'}
+									<span style="margin-left: auto; font-size: 0.72rem; color: oklch(0.6 0 0);">queued</span>
+								{:else if copyProgress[zone.id] === 'running'}
+									<span style="margin-left: auto; font-size: 0.72rem; color: oklch(0.75 0.1 250);">copying…</span>
+								{:else if copyProgress[zone.id] === 'ok'}
+									<span style="margin-left: auto; font-size: 0.72rem; color: oklch(0.78 0.18 140);">✓ done</span>
+								{:else if copyProgress[zone.id] === 'error'}
+									<span style="margin-left: auto; font-size: 0.72rem; color: oklch(0.65 0.22 20);">✗ failed</span>
+								{/if}
 							</label>
 						{/each}
 						{#if filteredCopyTargetZones.filter((z) => z.id !== selectedZoneId).length === 0}
@@ -2023,7 +2043,11 @@
 
 				<div class="row">
 					<button class="button" type="button" onclick={executeCopy} disabled={busy || copyTargetZoneIds.size === 0 || copySelection.size === 0}>
-						Copy {copySelection.size} Rule(s) to {copyTargetZoneIds.size} Zone(s)
+						{#if busy}
+							Copying… ({Object.values(copyProgress).filter((s) => s === 'ok' || s === 'error').length} / {copyTargetZoneIds.size})
+						{:else}
+							Copy {copySelection.size} Rule(s) to {copyTargetZoneIds.size} Zone(s)
+						{/if}
 					</button>
 				</div>
 			{/if}
