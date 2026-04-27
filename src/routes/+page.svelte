@@ -223,18 +223,24 @@
 	];
 
 	const COUNTRY_VALUE_OPTIONS: FieldValueOption[] = (() => {
-		const intl = Intl as unknown as { supportedValuesOf?: (key: string) => string[] };
-		if (typeof intl.supportedValuesOf !== 'function') return [];
+		try {
+			const displayNames = new Intl.DisplayNames(['en'], { type: 'region' });
+			const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+			const options: FieldValueOption[] = [];
 
-		const displayNames = new Intl.DisplayNames(['en'], { type: 'region' });
-		return intl
-			.supportedValuesOf('region')
-			.filter((code) => /^[A-Z]{2}$/.test(code))
-			.map((code) => {
-				const name = displayNames.of(code) ?? code;
-				return { value: code, label: `${name} (${code})` };
-			})
-			.sort((a, b) => a.label.localeCompare(b.label));
+			for (const first of letters) {
+				for (const second of letters) {
+					const code = `${first}${second}`;
+					const name = displayNames.of(code);
+					if (!name || name === code || /unknown region/i.test(name)) continue;
+					options.push({ value: code, label: `${name} (${code})` });
+				}
+			}
+
+			return options.sort((a, b) => a.label.localeCompare(b.label));
+		} catch {
+			return [];
+		}
 	})();
 
 	const FIELD_OPERATOR_OVERRIDES: Partial<Record<MatchFieldOptionValue, MatchOperatorOptionValue[]>> = {
