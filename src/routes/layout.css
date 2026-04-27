@@ -220,6 +220,19 @@ main {
 	font-weight: 700;
 	letter-spacing: 0.03em;
 	text-transform: uppercase;
+
+.rule-row {
+	cursor: pointer;
+	transition: background 0.1s;
+}
+
+.rule-row:hover {
+	background: oklch(0.2 0.01 230 / 0.5);
+}
+
+.rule-row.expanded {
+	background: oklch(0.18 0.02 230 / 0.3);
+}
 }
 
 .muted a {

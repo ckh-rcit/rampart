@@ -1320,6 +1320,7 @@
 					<table>
 						<thead>
 							<tr>
+								<th style="width: 3%;"></th>
 								<th style="width: 4%;">#</th>
 								<th style="width: 7%;">On</th>
 								<th style="width: 20%;">Name</th>
@@ -1331,9 +1332,11 @@
 						<tbody>
 							{#each existingRules as rule, index}
 								<tr
-									style="cursor: pointer; {expandedRuleIndex === index ? 'background: oklch(0.18 0.02 230 / 0.3);' : ''}"
+									class="rule-row {expandedRuleIndex === index ? 'expanded' : ''}"
 									onclick={() => toggleExpandRule(index)}
+									title="Click to edit rule"
 								>
+									<td style="text-align: center; color: var(--muted); font-size: 0.65rem;">{expandedRuleIndex === index ? '▲' : '▶'}</td>
 									<td>{index + 1}</td>
 									<td>
 										<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -1365,8 +1368,8 @@
 
 								{#if expandedRuleIndex === index}
 									<tr>
-										<td colspan="6" style="padding: 0;">
-											<div class="panel stack" style="margin: 0.35rem 0;">
+										<td colspan="7" style="padding: 0;">
+											<div class="panel stack" style="margin: 0.35rem 0; border-left: 2px solid var(--accent);">
 												<label class="stack">
 													<span class="label">Rule Name / Description</span>
 													<input class="input" bind:value={rule.description} />
