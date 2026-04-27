@@ -215,7 +215,7 @@ main {
 }
 
 .label {
-	color: oklch(0.88 0.06 50);
+	color: oklch(0.78 0.1 230);
 	font-size: 0.74rem;
 	font-weight: 700;
 	letter-spacing: 0.03em;
