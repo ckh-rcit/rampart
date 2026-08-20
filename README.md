@@ -4,6 +4,8 @@ A Cloudflare WAF Custom Rules manager focused on fast rule editing and safe bulk
 
 Rampart provides a single interface for viewing, editing, creating, importing, exporting, copying, removing, and pushing custom firewall rules between zones with an expression editor and Simple View builder.
 
+<img width="1715" height="596" alt="msedge_ZmCmuD1nay" src="https://github.com/user-attachments/assets/7f36f24a-287f-4b09-aac3-ac5cb74586fd" />
+
 ## Features
 
 - Manage per-zone rules
